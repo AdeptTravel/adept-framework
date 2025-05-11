@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/adepttraveler/adept-framework/internal/analytics"
+	"github.com/AdeptTravel/adept-framework/internal/analytics"
 	"github.com/go-chi/chi/v5"
 )
 

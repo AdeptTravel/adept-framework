@@ -6,9 +6,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/adepttraveler/adept-framework/internal/bus"
-	"github.com/adepttraveler/adept-framework/internal/outbox"
-	"github.com/adepttraveler/adept-framework/modules/site"
+	"github.com/AdeptTravel/adept-framework/internal/bus"
+	"github.com/AdeptTravel/adept-framework/internal/outbox"
+	"github.com/AdeptTravel/adept-framework/modules/site"
 )
 
 type Context struct {

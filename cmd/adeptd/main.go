@@ -10,11 +10,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 
-	"github.com/adepttraveler/adept-framework/internal/analytics"
-	"github.com/adepttraveler/adept-framework/internal/app"
-	"github.com/adepttraveler/adept-framework/internal/bus"
-	"github.com/adepttraveler/adept-framework/internal/db"
-	"github.com/adepttraveler/adept-framework/internal/outbox"
+	"github.com/AdeptTravel/adept-framework/internal/analytics"
+	"github.com/AdeptTravel/adept-framework/internal/app"
+	"github.com/AdeptTravel/adept-framework/internal/bus"
+	"github.com/AdeptTravel/adept-framework/internal/db"
+	"github.com/AdeptTravel/adept-framework/internal/outbox"
 )
 
 func main() {

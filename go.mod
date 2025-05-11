@@ -1,4 +1,4 @@
-module github.com/adepttraveler/adept-framework
+module github.com/AdeptTravel/adept-framework
 
 go 1.24.3
 
