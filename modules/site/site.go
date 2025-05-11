@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/adepttravel/adept-framework/internal/analytics"
+	"github.com/adepttraveler/adept-framework/internal/analytics"
 )
 
 type AnalyticsWriter = analytics.Writer
