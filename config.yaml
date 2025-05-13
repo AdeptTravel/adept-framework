@@ -4,6 +4,7 @@ app:
   dev_host: "localhost"
   host: "dev.adept.travel"
 
+  
 database:
   host: "localhost"
   port: 3306
@@ -11,3 +12,5 @@ database:
   pass: "adepttravel"
   name: "adepttravel"
   
+geoip:
+  db_path: "data/GeoLite2-City.mmdb"   # relative or absolute

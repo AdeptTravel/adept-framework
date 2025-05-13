@@ -1,0 +1,19 @@
+{{ define "title" }}Request Debug{{ end }}
+
+{{ define "content" }}
+<h1>Request / Session Information</h1>
+<ul>
+  <li><strong>Timestamp:</strong> {{ .Time }}</li>
+  <li><strong>User-Agent:</strong> {{ .UserAgent }}</li>
+  <li><strong>Client IP:</strong> {{ .IP }}</li>
+  <li><strong>URL Host:</strong> {{ .Host }}</li>
+  <li><strong>URL Path:</strong> {{ .Path }}</li>
+  {{- if .Geo }}
+  <li><strong>Country:</strong> {{ .Geo.Country }} ({{ .Geo.CountryISO }})</li>
+  <li><strong>City:</strong> {{ .Geo.City }}</li>
+  <li><strong>Lat/Lon:</strong> {{ printf "%.4f, %.4f" .Geo.Lat .Geo.Lon }}</li>
+  {{- end }}
+</ul>
+{{ end }}
+
+{{ template "base" . }}

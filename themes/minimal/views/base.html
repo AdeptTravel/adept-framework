@@ -1,0 +1,29 @@
+{{ define "base" -}}
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>{{ block "title" . }}Adept Minimal{{ end }}</title>
+    <style>
+        body {
+            font-family: system-ui, Arial, sans-serif;
+            margin: 2rem
+        }
+
+        h1 {
+            margin-top: 0
+        }
+
+        ul {
+            line-height: 1.6
+        }
+    </style>
+</head>
+
+<body>
+    {{ block "content" . }}{{ end }}
+</body>
+
+</html>
+{{- end }}
