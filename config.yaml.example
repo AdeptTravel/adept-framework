@@ -1,0 +1,18 @@
+app:
+  name: "Adept Traveler – Public Website"
+
+database:
+  host: "localhost"
+  port: 3306
+  user: "username"
+  pass: "password"
+  name: "database"
+  params:
+    parseTime: "true"
+    loc: "Local"
+
+modules:
+  site:         true   # serve public pages
+  cms:          true
+  crm:          false  # disable CRM in this instance
+  itinerary:    true

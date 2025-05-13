@@ -1,0 +1,13 @@
+app:
+  name: "Adept Traveler – Public Website"
+  use_dev_host: true
+  dev_host: "localhost"
+  host: "dev.adept.travel"
+
+database:
+  host: "localhost"
+  port: 3306
+  user: "adepttravel"
+  pass: "adepttravel"
+  name: "adepttravel"
+  
