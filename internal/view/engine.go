@@ -10,32 +10,38 @@ import (
 	"strings"
 )
 
-// Engine stores parsed templates keyed by theme name.
+// Engine parses and stores templates for each theme.
 type Engine struct {
-	themes map[string]*template.Template
+	themes map[string]*template.Template // theme slug → template set
 	funcs  template.FuncMap
 }
 
-// New builds an Engine from the embedded theme filesystem.
+// New builds an Engine from an embed.FS that contains:
 //
-// It expects the theme folders to live under   themes/{theme}/templates/*.html
-// in the provided embed.FS.
+//   <theme>/views/*.html
+//
+// Each first-level directory in the FS is treated as a separate theme
+// (e.g., minimal/views/*.html, modern/views/*.html, …).
 func New(themeFS embed.FS, funcs template.FuncMap) (*Engine, error) {
-	e := &Engine{themes: map[string]*template.Template{}, funcs: funcs}
+	e := &Engine{
+		themes: map[string]*template.Template{},
+		funcs:  funcs,
+	}
 
-	entries, err := themeFS.ReadDir(".") // look at top-level dirs inside the embed FS
+	// discover theme directories at FS root
+	rootEntries, err := themeFS.ReadDir(".")
 	if err != nil {
 		return nil, err
 	}
 
-	for _, dir := range entries {
+	for _, dir := range rootEntries {
 		if !dir.IsDir() {
 			continue
 		}
-		slug := dir.Name()                            // e.g. "minimal"
-		pattern := filepath.Join(slug, "templates", "*.html")
+		slug := dir.Name()                             // "minimal"
+		pattern := filepath.Join(slug, "views", "*.html")
 
-		tpl, err := template.New(slug).Funcs(e.funcs).ParseFS(themeFS, pattern)
+		tpl, err := template.New(slug).Funcs(funcs).ParseFS(themeFS, pattern)
 		if err != nil {
 			return nil, err
 		}
@@ -44,17 +50,17 @@ func New(themeFS embed.FS, funcs template.FuncMap) (*Engine, error) {
 	return e, nil
 }
 
-// ----------------------------------------------------------------------------
-// Engine API
-// ----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
 
-// Exec renders tplName (e.g. "demo/demo") directly to w.
+// Exec renders tplName (e.g., "demo/demo") directly to w using the chosen theme.
 func (e *Engine) Exec(w http.ResponseWriter, theme, tplName string, data any) error {
 	tpl := e.lookup(theme)
 	return tpl.ExecuteTemplate(w, tplName, data)
 }
 
-// ExecuteToHTML renders into a string and returns template.HTML (useful for widgets).
+// ExecuteToHTML renders tplName and returns it as template.HTML (for widgets).
 func (e *Engine) ExecuteToHTML(theme, tplName string, data any) (template.HTML, error) {
 	tpl := e.lookup(theme)
 	var buf bytes.Buffer
@@ -64,11 +70,9 @@ func (e *Engine) ExecuteToHTML(theme, tplName string, data any) (template.HTML, 
 	return template.HTML(buf.String()), nil
 }
 
-// AppendFS allows a module to register its own templates.
-//
-// Every *.html file found anywhere inside modFS becomes a template named
-//   prefix/<base-name-without-ext>
-// embedded into *every* theme's Template set.
+// AppendFS allows a module to register its own templates.  Every *.html file
+// found anywhere inside modFS is loaded under the name
+//   prefix/<filename-without-ext>
 func (e *Engine) AppendFS(prefix string, modFS embed.FS) error {
 	return fs.WalkDir(modFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".html") {
@@ -81,7 +85,6 @@ func (e *Engine) AppendFS(prefix string, modFS embed.FS) error {
 		if readErr != nil {
 			return readErr
 		}
-
 		for _, tpl := range e.themes {
 			if _, parseErr := tpl.New(name).Parse(string(b)); parseErr != nil {
 				return parseErr
@@ -91,10 +94,13 @@ func (e *Engine) AppendFS(prefix string, modFS embed.FS) error {
 	})
 }
 
-// lookup returns the Template set for theme or falls back to "minimal".
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
 func (e *Engine) lookup(theme string) *template.Template {
 	if tpl, ok := e.themes[theme]; ok {
 		return tpl
 	}
-	return e.themes["minimal"]
+	return e.themes["minimal"] // fallback
 }
