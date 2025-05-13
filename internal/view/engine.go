@@ -21,22 +21,19 @@ type Engine struct {
 // It expects the theme folders to live under   themes/{theme}/templates/*.html
 // in the provided embed.FS.
 func New(themeFS embed.FS, funcs template.FuncMap) (*Engine, error) {
-	e := &Engine{
-		themes: map[string]*template.Template{},
-		funcs:  funcs,
-	}
+	e := &Engine{themes: map[string]*template.Template{}, funcs: funcs}
 
-	themeDirs, err := themeFS.ReadDir("themes")
+	entries, err := themeFS.ReadDir(".") // look at top-level dirs inside the embed FS
 	if err != nil {
 		return nil, err
 	}
 
-	for _, dir := range themeDirs {
+	for _, dir := range entries {
 		if !dir.IsDir() {
 			continue
 		}
-		slug := dir.Name() // e.g. "minimal"
-		pattern := filepath.Join("themes", slug, "templates", "*.html")
+		slug := dir.Name()                            // e.g. "minimal"
+		pattern := filepath.Join(slug, "templates", "*.html")
 
 		tpl, err := template.New(slug).Funcs(e.funcs).ParseFS(themeFS, pattern)
 		if err != nil {

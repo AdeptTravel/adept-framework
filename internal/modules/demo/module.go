@@ -11,7 +11,7 @@ import (
 //go:embed views/*.html
 var fs embed.FS
 
-// RegisterTemplates adds this module’s templates under the "demo/" namespace.
+// RegisterTemplates adds this module’s view under the "demo/" namespace.
 func RegisterTemplates(v *view.Engine) error {
 	return v.AppendFS("demo", fs)
 }

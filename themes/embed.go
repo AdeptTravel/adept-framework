@@ -2,7 +2,7 @@ package themes
 
 import "embed"
 
-// embed every template file under themes/*
+// Embed everything under each theme directory (minimal, future themes).
 //
-//go:embed minimal/views/*.html
+//go:embed minimal/**/*
 var FS embed.FS
