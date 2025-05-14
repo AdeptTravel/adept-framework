@@ -4,22 +4,22 @@ import (
 	"embed"
 	htmpl "html/template"
 
-	"github.com/AdeptTravel/adept-framework/internal/site"
+	"github.com/AdeptTravel/adept-framework/internal/requestctx"
 	"github.com/AdeptTravel/adept-framework/internal/view"
 )
 
 //go:embed views/*.html
 var fs embed.FS
 
-// RegisterTemplates adds this module’s view under the "demo/" namespace.
+// RegisterTemplates adds this module’s templates.
 func RegisterTemplates(v *view.Engine) error {
 	return v.AppendFS("demo", fs)
 }
 
-// Data is just an alias of site.ReqInfo, so callers can pass it directly.
-type Data = site.ReqInfo
+// Data is now an alias for the unified request context.
+type Data = requestctx.RequestCtx
 
-// Render turns Data into an HTML fragment (useful for widgets later).
+// Render returns the demo fragment.
 func Render(v *view.Engine, theme string, d Data) (htmpl.HTML, error) {
-	return v.ExecuteToHTML(theme, "views/demo", d)
+	return v.ExecuteToHTML(theme, "demo/demo", d)
 }

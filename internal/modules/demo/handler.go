@@ -6,11 +6,15 @@ import (
 	"github.com/AdeptTravel/adept-framework/internal/view"
 )
 
-func Handler(engine *view.Engine, getData func(*http.Request) Data) http.HandlerFunc {
+// Handler returns an http.HandlerFunc that renders the demo page.
+//   - engine : view engine
+//   - dataFn : callback that produces Data for each request
+func Handler(engine *view.Engine, dataFn func(*http.Request) Data) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		d := getData(r)                       // extract timestamp, IP, geo …
-		if err := engine.Exec(w, "minimal", "reqinfo/debug", d); err != nil {
-			http.Error(w, "template error: "+err.Error(), 500)
+		data := dataFn(r)
+		// theme is hard-coded to "minimal" for now; later you’ll pull from site context.
+		if err := engine.Exec(w, "minimal", "demo/demo", data); err != nil {
+			http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 		}
 	}
 }
