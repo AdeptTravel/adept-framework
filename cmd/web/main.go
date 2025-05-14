@@ -15,10 +15,18 @@ import (
 
 func main() {
 	// ------------------------------------------------------------------ load config
-	cfg, err := config.Load("config.yaml")
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
+	gCfg, _ := config.LoadGlobal("config.yaml")
+
+	// existing DB / GeoIP bootstrap using gCfg …
+
+	sitesRoot := "sites"
+	mux := http.NewServeMux()
+	// register routes …
+
+	handler := middleware.AttachSiteConfig(sitesRoot)(
+		middleware.AttachRequestCtx(gdb, "")(mux))
+
+	log.Fatal(http.ListenAndServe(":8080", handler))
 
 	// ------------------------------------------------------------------ optional Geo-IP
 	var gdb *geo.DB
