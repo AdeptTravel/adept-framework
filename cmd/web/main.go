@@ -1,18 +1,23 @@
-// Command web boots the framework inside a FreeBSD jail.
+// Command web boots the Adept Framework multi-tenant HTTP server.
 //
-// Flags:
-//
-//	-host   host name to serve (overrides SITE_HOST env)   default ""
-//	-addr   listen address                                 default ":8080"
+// Startup sequence:
+//  1. Load environment variables from /usr/local/etc/adept-framework/global.env
+//     if it exists, otherwise load .env in the current directory.
+//  2. Connect to the global control-plane database using GLOBAL_DB_DSN.
+//  3. Query every site with status = 'Active'.
+//  4. Open each tenant database from its stored DSN.
+//  5. Dispatch requests by the Host header to the correct tenant.
+//  6. Listen on :8080 and serve a placeholder handler.
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 
 	"github.com/AdeptTravel/adept-framework/internal/database"
@@ -20,67 +25,95 @@ import (
 )
 
 const (
-	envFile = "/usr/local/etc/adept-framework/global.env"
-	logDir  = "log"                     // ./log/YYYY-MM-DD.log
-	geoCity = "data/GeoLite2-City.mmdb" // hard-coded for now
+	serverEnvPath = "/usr/local/etc/adept-framework/global.env"
+	listenAddr    = ":8080"
+	logDir        = "log"                     // ./log/YYYY-MM-DD.log
+	geoCity       = "data/GeoLite2-City.mmdb" // GeoLite2 database
 )
 
+// tenant groups one site’s metadata with its open connection pool.
+type tenant struct {
+	meta site.Record
+	db   *sqlx.DB
+}
+
+// loadEnv first tries the server-level env file.  If absent, it falls back
+// to .env in the working directory.
+func loadEnv() {
+	if _, err := os.Stat(serverEnvPath); err == nil {
+		_ = godotenv.Load(serverEnvPath)
+		return
+	}
+	_ = godotenv.Load()
+}
+
 func init() {
-	// Load env file for local jails.  In production you can omit the file
-	// and inject variables directly through rc.d or jail.conf.
-	_ = godotenv.Load(envFile)
+	loadEnv()
 }
 
 func main() {
-	hostFlag := flag.String("host", "", "virtual host served by this instance")
-	addrFlag := flag.String("addr", ":8080", "listen address")
-	flag.Parse()
-
-	host := firstNonEmpty(*hostFlag, os.Getenv("SITE_HOST"))
-	if host == "" {
-		log.Fatal("no site host specified (flag -host or SITE_HOST env)")
-	}
+	/// Open the global (control-plane) database.
 
 	globalDSN := os.Getenv("GLOBAL_DB_DSN")
 	if globalDSN == "" {
 		log.Fatal("GLOBAL_DB_DSN is not set")
 	}
-
-	// Connect to control-plane database.
 	globalDB, err := database.Open(globalDSN)
 	if err != nil {
 		log.Fatalf("connect global DB: %v", err)
 	}
 	defer globalDB.Close()
 
-	// Fetch site record by host.
-	siteRec, err := site.ByHost(globalDB, host)
+	/// Load every active site and open each tenant database.
+
+	records, err := site.AllActive(globalDB)
 	if err != nil {
-		log.Fatalf("site lookup failed for %s: %v", host, err)
+		log.Fatalf("query site table: %v", err)
+	}
+	if len(records) == 0 {
+		log.Fatal("no active sites found")
 	}
 
-	// Open tenant database.
-	siteDB, err := database.Open(siteRec.DSN)
-	if err != nil {
-		log.Fatalf("connect site DB: %v", err)
+	tenants := make(map[string]tenant, len(records))
+	for _, rec := range records {
+		db, err := database.Open(rec.DSN)
+		if err != nil {
+			log.Printf("SKIP %s: cannot connect to tenant DB (%v)", rec.Host, err)
+			continue
+		}
+		tenants[rec.Host] = tenant{meta: rec, db: db}
+		log.Printf("loaded tenant %s (theme=%s)", rec.Host, rec.Theme)
 	}
-	defer siteDB.Close()
+	if len(tenants) == 0 {
+		log.Fatal("no tenant databases opened successfully")
+	}
 
-	log.Printf("serving %s (%s) on %s", siteRec.Host, siteRec.Theme, *addrFlag)
+	/// Register the global HTTP handler that dispatches by Host.
 
-	// TODO: attach router, middlewares, module loader, etc.
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, "OK")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		host := stripPort(r.Host)
+		t, ok := tenants[host]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		// TODO: replace this with the real router and template engine.
+		fmt.Fprintf(w, "Hello from %s (theme=%s)\n", t.meta.Host, t.meta.Theme)
 	})
 
-	if err := http.ListenAndServe(*addrFlag, nil); err != nil {
+	/// Start the server.
+
+	log.Printf("listening on %s for %d tenants", listenAddr, len(tenants))
+	if err := http.ListenAndServe(listenAddr, nil); err != nil {
 		log.Fatalf("http server: %v", err)
 	}
 }
 
-func firstNonEmpty(v1, v2 string) string {
-	if v1 != "" {
-		return v1
+// stripPort removes the :port suffix from a Host header when present.
+func stripPort(h string) string {
+	if i := strings.IndexByte(h, ':'); i != -1 {
+		return h[:i]
 	}
-	return v2
+	return h
 }
