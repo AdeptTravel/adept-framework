@@ -1,19 +1,4 @@
 // Command web boots the Adept Framework multi-tenant HTTP server.
-//
-// Workflow
-//   • Load environment variables from /usr/local/etc/adept-framework/global.env
-//     if present, else fall back to .env in the working directory.
-//   • Connect to the global control-plane database using GLOBAL_DB_DSN.
-//   • Initialise a tenant.Cache that lazy-loads site records and opens per-
-//     tenant connection pools on demand.
-//   • Handle every HTTP request by mapping r.Host to a cached tenant,
-//     loading it if necessary, and updating the LastSeen timestamp.
-//   • Expose Prometheus metrics on /metrics and a placeholder root handler.
-/*
-   Required imports
-     go get golang.org/x/sync
-     go get github.com/prometheus/client_golang
-*/
 package main
 
 import (
@@ -27,13 +12,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/AdeptTravel/adept-framework/internal/database"
+	"github.com/AdeptTravel/adept-framework/internal/logger"
 	"github.com/AdeptTravel/adept-framework/internal/tenant"
 )
 
-const (
-	serverEnvPath = "/usr/local/etc/adept-framework/global.env"
-	listenAddr    = ":8080"
-)
+const serverEnvPath = "/usr/local/etc/adept-framework/global.env"
+const listenAddr = ":8080"
 
 // loadEnv first tries the server-level env file.  If absent, it falls back
 // to .env in the working directory.
@@ -45,37 +29,54 @@ func loadEnv() {
 	_ = godotenv.Load()
 }
 
+// runningInTTY returns true when stdout is a character device.  The result is
+// used to decide whether to tee log output to the console.
+func runningInTTY() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
 func init() {
 	loadEnv()
 }
 
 func main() {
+	rootDir, _ := os.Getwd()
+	logOut, err := logger.New(rootDir, runningInTTY())
+	if err != nil {
+		log.Fatalf("start logger: %v", err)
+	}
+
 	/// Open the global (control-plane) database.
 
 	globalDSN := os.Getenv("GLOBAL_DB_DSN")
 	if globalDSN == "" {
-		log.Fatal("GLOBAL_DB_DSN is not set")
+		logOut.Fatal("GLOBAL_DB_DSN is not set")
 	}
+
+	logOut.Println("connecting to global DB …")
 	globalDB, err := database.Open(globalDSN)
 	if err != nil {
-		log.Fatalf("connect global DB: %v", err)
+		logOut.Fatalf("connect global DB: %v", err)
 	}
 	defer globalDB.Close()
+	logOut.Println("global DB online")
 
-	/// Initialise the tenant cache with default TTL and capacity.
+	/// Initialise the tenant cache.
 
 	cache := tenant.New(
 		globalDB,
-		tenant.IdleTTL,    // 30-minute idle timeout
-		tenant.MaxEntries, // 100 tenants before LRU eviction
+		tenant.IdleTTL,
+		tenant.MaxEntries,
 	)
 
 	/// Register HTTP handlers.
 
-	// Metrics endpoint for Prometheus scraping.
 	http.Handle("/metrics", promhttp.Handler())
 
-	// Main catch-all handler that dispatches by Host header.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
 
@@ -85,15 +86,15 @@ func main() {
 			return
 		}
 
-		// TODO: replace with real router and template engine.
+		// Placeholder response
 		fmt.Fprintf(w, "Hello from %s (theme=%s)\n", ten.Meta.Host, ten.Meta.Theme)
 	})
 
 	/// Start the HTTP server.
 
-	log.Printf("listening on %s", listenAddr)
+	logOut.Printf("listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, nil); err != nil {
-		log.Fatalf("http server: %v", err)
+		logOut.Fatalf("http server: %v", err)
 	}
 }
 

@@ -1,45 +1,117 @@
-// Package database centralises sqlx connection helpers.  The default driver
-// is go-sql-driver/mysql, which also works with MariaDB and Cockroach when
-// configured for the MySQL wire protocol.
-//
-// Public entry points:
-//
-//	Open(dsn)                    – quick helper with conservative pool sizes.
-//	OpenWithOptions(dsn, maxOpen, maxIdle) – fine-grained control.
-//
-// Both helpers Ping the database before returning so callers can fail fast
-// during bootstrap.  Callers should Close() the returned *sqlx.DB when no
-// longer needed.
+// Package database centralises sqlx connection helpers.  The wrapper
+// intentionally stays thin, but it now offers context‑aware dialing, retry
+// logic, and configurable pool sizes so callers can tailor resource usage
+// without rewriting boilerplate.
+
 package database
 
 import (
+	"context"
+	"errors"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/go-sql-driver/mysql" // side‑effect import keeps driver pluggable
 	"github.com/jmoiron/sqlx"
 )
 
-// Open returns a *sqlx.DB with sane defaults: 15 max open, 5 idle, and a
-// 30-minute connection lifetime.  Suitable for process-wide pools or for test
-// setups.
-func Open(dsn string) (*sqlx.DB, error) {
-	return OpenWithOptions(dsn, 15, 5)
+//
+// Options lets callers tune connection‑pool behaviour and retry policy.
+// Zero values fall back to sensible defaults.
+//
+
+type Options struct {
+	MaxOpenConns    int           // default 15
+	MaxIdleConns    int           // default 5
+	ConnMaxLifetime time.Duration // default 30m
+	Retries         int           // dial retries, default 0 (no retry)
+	RetryBackoff    time.Duration // sleep between retries, default 1s
 }
 
-// OpenWithOptions lets callers tune maxOpen and maxIdle per pool.  Used by
-// the tenant loader to keep per-tenant resource usage small.
-func OpenWithOptions(dsn string, maxOpen, maxIdle int) (*sqlx.DB, error) {
-	db, err := sqlx.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
+var defaultOpts = Options{
+	MaxOpenConns:    15,
+	MaxIdleConns:    5,
+	ConnMaxLifetime: 30 * time.Minute,
+	Retries:         0,
+	RetryBackoff:    time.Second,
+}
+
+// merge fills zero values in dst with defaults.
+func (dst *Options) merge() {
+	if dst.MaxOpenConns == 0 {
+		dst.MaxOpenConns = defaultOpts.MaxOpenConns
+	}
+	if dst.MaxIdleConns == 0 {
+		dst.MaxIdleConns = defaultOpts.MaxIdleConns
+	}
+	if dst.ConnMaxLifetime == 0 {
+		dst.ConnMaxLifetime = defaultOpts.ConnMaxLifetime
+	}
+	if dst.RetryBackoff == 0 {
+		dst.RetryBackoff = defaultOpts.RetryBackoff
+	}
+}
+
+// Open is a convenience wrapper that dials with background context and
+// default pool sizes.
+func Open(dsn string) (*sqlx.DB, error) {
+	return OpenWithOptions(context.Background(), dsn, Options{})
+}
+
+// OpenWithPool lets callers override maxOpen and maxIdle while keeping all
+// other defaults intact.
+func OpenWithPool(dsn string, maxOpen, maxIdle int) (*sqlx.DB, error) {
+	return OpenWithOptions(context.Background(), dsn, Options{
+		MaxOpenConns: maxOpen,
+		MaxIdleConns: maxIdle,
+	})
+}
+
+// OpenWithOptions dials using the provided context and options.  If Retries
+// > 0, it will re‑attempt the dial + ping loop with exponential backoff.
+func OpenWithOptions(ctx context.Context, dsn string, opts Options) (*sqlx.DB, error) {
+	opts.merge()
+
+	var lastErr error
+	backoff := opts.RetryBackoff
+
+	for attempt := 0; attempt <= opts.Retries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		db, err := sqlx.Open("mysql", dsn)
+		if err != nil {
+			lastErr = err
+			goto retry
+		}
+
+		db.SetMaxOpenConns(opts.MaxOpenConns)
+		db.SetMaxIdleConns(opts.MaxIdleConns)
+		db.SetConnMaxLifetime(opts.ConnMaxLifetime)
+
+		if err = db.PingContext(ctx); err == nil {
+			return db, nil // success
+		}
+
+		// ping failed, record error and retry after close
+		_ = db.Close()
+		lastErr = err
+
+	retry:
+		if attempt < opts.Retries {
+			select {
+			case <-time.After(backoff):
+				backoff *= 2 // simple exponential
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 	}
 
-	db.SetMaxOpenConns(maxOpen)
-	db.SetMaxIdleConns(maxIdle)
-	db.SetConnMaxLifetime(30 * time.Minute)
-
-	if err := db.Ping(); err != nil {
-		return nil, err
+	if lastErr == nil {
+		lastErr = errors.New("database: open failed with unknown error")
 	}
-	return db, nil
+	return nil, lastErr
 }
