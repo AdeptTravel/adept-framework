@@ -1,3 +1,10 @@
+// evictor.go houses the eviction loop for Cache.  Every EvictInterval it
+// scans the map and removes:
+//
+//   - tenants idle longer than idleTTL
+//   - least-recently-used tenants when map size exceeds maxEntries
+//
+// Each eviction event is logged and updates Prometheus counters.
 package tenant
 
 import (
@@ -8,14 +15,14 @@ import (
 	"github.com/AdeptTravel/adept-framework/internal/metrics"
 )
 
-// evictLoop runs in a goroutine.  Every EvictInterval it removes idle
-// tenants and trims the cache to MaxEntries via a simple LRU pass.
 func (c *Cache) evictLoop() {
 	for range c.evictTicker.C {
 		now := time.Now().UnixNano()
 		var count int
 
-		// First pass: idle eviction.
+		// ----------------------------------------------------------------
+		// Idle eviction pass
+		// ----------------------------------------------------------------
 		c.m.Range(func(key, value any) bool {
 			count++
 			ent := value.(*entry)
@@ -23,13 +30,16 @@ func (c *Cache) evictLoop() {
 			if idle > c.idleTTL {
 				_ = ent.tenant.Close()
 				c.m.Delete(key)
+				c.log.Printf("tenant %s evicted after %v idle", key, idle.Truncate(time.Second))
 				metrics.TenantEvictTotal.Inc()
 				metrics.ActiveTenants.Dec()
 			}
 			return true
 		})
 
-		// Second pass: LRU eviction if over capacity.
+		// ----------------------------------------------------------------
+		// LRU eviction pass
+		// ----------------------------------------------------------------
 		if c.maxEntries > 0 && count > c.maxEntries {
 			type kv struct {
 				key string
@@ -46,6 +56,7 @@ func (c *Cache) evictLoop() {
 				if v, ok := c.m.Load(all[i].key); ok {
 					_ = v.(*entry).tenant.Close()
 					c.m.Delete(all[i].key)
+					c.log.Printf("tenant %s evicted (LRU pressure)", all[i].key)
 					metrics.TenantEvictTotal.Inc()
 					metrics.ActiveTenants.Dec()
 				}

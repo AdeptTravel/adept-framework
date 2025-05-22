@@ -1,4 +1,3 @@
-// Command web boots the Adept Framework multi-tenant HTTP server.
 package main
 
 import (
@@ -19,8 +18,7 @@ import (
 const serverEnvPath = "/usr/local/etc/adept-framework/global.env"
 const listenAddr = ":8080"
 
-// loadEnv first tries the server-level env file.  If absent, it falls back
-// to .env in the working directory.
+// loadEnv loads server-level env vars, falling back to .env for dev.
 func loadEnv() {
 	if _, err := os.Stat(serverEnvPath); err == nil {
 		_ = godotenv.Load(serverEnvPath)
@@ -29,8 +27,7 @@ func loadEnv() {
 	_ = godotenv.Load()
 }
 
-// runningInTTY returns true when stdout is a character device.  The result is
-// used to decide whether to tee log output to the console.
+// runningInTTY returns true when stdout is a TTY.
 func runningInTTY() bool {
 	fi, err := os.Stdout.Stat()
 	if err != nil {
@@ -39,9 +36,7 @@ func runningInTTY() bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-func init() {
-	loadEnv()
-}
+func init() { loadEnv() }
 
 func main() {
 	rootDir, _ := os.Getwd()
@@ -50,8 +45,9 @@ func main() {
 		log.Fatalf("start logger: %v", err)
 	}
 
-	/// Open the global (control-plane) database.
-
+	//
+	// Connect to the global database.
+	//
 	globalDSN := os.Getenv("GLOBAL_DB_DSN")
 	if globalDSN == "" {
 		logOut.Fatal("GLOBAL_DB_DSN is not set")
@@ -65,16 +61,27 @@ func main() {
 	defer globalDB.Close()
 	logOut.Println("global DB online")
 
-	/// Initialise the tenant cache.
+	// Count active sites to confirm correct database selection.
+	var activeCount int
+	const countSQL = `
+	    SELECT COUNT(*)
+	    FROM   site
+	    WHERE  suspended_at IS NULL
+	      AND  deleted_at   IS NULL`
+	if err := globalDB.Get(&activeCount, countSQL); err != nil {
+		logOut.Printf("could not count active sites: %v", err)
+	} else {
+		logOut.Printf("%d active site(s) found in site table", activeCount)
+	}
 
-	cache := tenant.New(
-		globalDB,
-		tenant.IdleTTL,
-		tenant.MaxEntries,
-	)
+	//
+	// Initialise the tenant cache.
+	//
+	cache := tenant.New(globalDB, tenant.IdleTTL, tenant.MaxEntries, logOut)
 
-	/// Register HTTP handlers.
-
+	// ----------------------------------------------------------------
+	// HTTP handlers
+	// ----------------------------------------------------------------
 	http.Handle("/metrics", promhttp.Handler())
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -85,12 +92,8 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-
-		// Placeholder response
 		fmt.Fprintf(w, "Hello from %s (theme=%s)\n", ten.Meta.Host, ten.Meta.Theme)
 	})
-
-	/// Start the HTTP server.
 
 	logOut.Printf("listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, nil); err != nil {
@@ -98,7 +101,7 @@ func main() {
 	}
 }
 
-// stripPort removes the :port suffix from a Host header when present.
+// stripPort removes any :port suffix from the Host header.
 func stripPort(h string) string {
 	if i := strings.IndexByte(h, ':'); i != -1 {
 		return h[:i]
