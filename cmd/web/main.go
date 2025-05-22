@@ -1,13 +1,19 @@
 // Command web boots the Adept Framework multi-tenant HTTP server.
 //
-// Startup sequence:
-//  1. Load environment variables from /usr/local/etc/adept-framework/global.env
-//     if it exists, otherwise load .env in the current directory.
-//  2. Connect to the global control-plane database using GLOBAL_DB_DSN.
-//  3. Query every site with status = 'Active'.
-//  4. Open each tenant database from its stored DSN.
-//  5. Dispatch requests by the Host header to the correct tenant.
-//  6. Listen on :8080 and serve a placeholder handler.
+// Workflow
+//   • Load environment variables from /usr/local/etc/adept-framework/global.env
+//     if present, else fall back to .env in the working directory.
+//   • Connect to the global control-plane database using GLOBAL_DB_DSN.
+//   • Initialise a tenant.Cache that lazy-loads site records and opens per-
+//     tenant connection pools on demand.
+//   • Handle every HTTP request by mapping r.Host to a cached tenant,
+//     loading it if necessary, and updating the LastSeen timestamp.
+//   • Expose Prometheus metrics on /metrics and a placeholder root handler.
+/*
+   Required imports
+     go get golang.org/x/sync
+     go get github.com/prometheus/client_golang
+*/
 package main
 
 import (
@@ -17,25 +23,17 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/AdeptTravel/adept-framework/internal/database"
-	"github.com/AdeptTravel/adept-framework/internal/site"
+	"github.com/AdeptTravel/adept-framework/internal/tenant"
 )
 
 const (
 	serverEnvPath = "/usr/local/etc/adept-framework/global.env"
 	listenAddr    = ":8080"
-	logDir        = "log"                     // ./log/YYYY-MM-DD.log
-	geoCity       = "data/GeoLite2-City.mmdb" // GeoLite2 database
 )
-
-// tenant groups one site’s metadata with its open connection pool.
-type tenant struct {
-	meta site.Record
-	db   *sqlx.DB
-}
 
 // loadEnv first tries the server-level env file.  If absent, it falls back
 // to .env in the working directory.
@@ -64,47 +62,36 @@ func main() {
 	}
 	defer globalDB.Close()
 
-	/// Load every active site and open each tenant database.
+	/// Initialise the tenant cache with default TTL and capacity.
 
-	records, err := site.AllActive(globalDB)
-	if err != nil {
-		log.Fatalf("query site table: %v", err)
-	}
-	if len(records) == 0 {
-		log.Fatal("no active sites found")
-	}
+	cache := tenant.New(
+		globalDB,
+		tenant.IdleTTL,    // 30-minute idle timeout
+		tenant.MaxEntries, // 100 tenants before LRU eviction
+	)
 
-	tenants := make(map[string]tenant, len(records))
-	for _, rec := range records {
-		db, err := database.Open(rec.DSN)
-		if err != nil {
-			log.Printf("SKIP %s: cannot connect to tenant DB (%v)", rec.Host, err)
-			continue
-		}
-		tenants[rec.Host] = tenant{meta: rec, db: db}
-		log.Printf("loaded tenant %s (theme=%s)", rec.Host, rec.Theme)
-	}
-	if len(tenants) == 0 {
-		log.Fatal("no tenant databases opened successfully")
-	}
+	/// Register HTTP handlers.
 
-	/// Register the global HTTP handler that dispatches by Host.
+	// Metrics endpoint for Prometheus scraping.
+	http.Handle("/metrics", promhttp.Handler())
 
+	// Main catch-all handler that dispatches by Host header.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
-		t, ok := tenants[host]
-		if !ok {
+
+		ten, err := cache.Get(host)
+		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 
-		// TODO: replace this with the real router and template engine.
-		fmt.Fprintf(w, "Hello from %s (theme=%s)\n", t.meta.Host, t.meta.Theme)
+		// TODO: replace with real router and template engine.
+		fmt.Fprintf(w, "Hello from %s (theme=%s)\n", ten.Meta.Host, ten.Meta.Theme)
 	})
 
-	/// Start the server.
+	/// Start the HTTP server.
 
-	log.Printf("listening on %s for %d tenants", listenAddr, len(tenants))
+	log.Printf("listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, nil); err != nil {
 		log.Fatalf("http server: %v", err)
 	}
