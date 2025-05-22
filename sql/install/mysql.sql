@@ -9,15 +9,22 @@ CREATE TABLE `event_outbox` (
 
 DROP TABLE IF EXISTS `site`;
 CREATE TABLE `site` (
-  `id`               INT UNSIGNED AUTO_INCREMENT,
-  `host`             VARCHAR(256) NOT NULL UNIQUE,
-  `dsn`              VARCHAR(128) NOT NULL,
-  `theme`            VARCHAR(256) NOT NULL DEFAULT 'base',
-  `status`           ENUM('Active', 'Block', 'Inactive') NOT NULL DEFAULT 'Active',
-  `created_at`       TIMESTAMP NOT NULL DEFAULT NOW(),
-  `updated_at`       TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `id`            INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+  `host`          VARCHAR(256)      NOT NULL,                    -- dev.adept.travel
+  `dsn`           VARCHAR(256)      NOT NULL,                    -- tenant DB DSN
+  `theme`         VARCHAR(128)      NOT NULL DEFAULT 'base',     -- template set
+  `title`         VARCHAR(256)      NOT NULL DEFAULT '',         -- marketing name
+  `locale`        VARCHAR(16)       NOT NULL DEFAULT 'en_US',    -- default i18n
+  `suspended_at`  TIMESTAMP         DEFAULT NULL,
+  `deleted_at`    TIMESTAMP         DEFAULT NULL,
+  `created_at`    TIMESTAMP         NOT NULL DEFAULT NOW(),
+  `updated_at`    TIMESTAMP         NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_site_host` (`host`),
+  KEY `idx_site_host_active` (`host`, `suspended_at`, `deleted_at`)                -- accelerates ByHost
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
 
 
 

@@ -1,18 +1,3 @@
-// Package site holds thin data-access helpers for the persistent `site`
-// table.  Each helper is a single-purpose query, returning a strongly typed
-// struct so callers do not repeat column names.
-//
-// The table schema:
-//
-//	CREATE TABLE site (
-//	    id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-//	    host       VARCHAR(256) NOT NULL UNIQUE,
-//	    dsn        VARCHAR(128) NOT NULL,
-//	    theme      VARCHAR(256) NOT NULL DEFAULT 'base',
-//	    status     ENUM('Active', 'Block', 'Inactive') NOT NULL DEFAULT 'Active',
-//	    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-//	    updated_at TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW()
-//	);
 package site
 
 import (
@@ -21,14 +6,16 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// AllActive returns every site with status = 'Active'.  Used by admin
-// dashboards or one-off migrations, but no longer required by the HTTP
+// AllActive returns every site that is neither suspended nor deleted.  This
+// helper is used by admin dashboards or batch operations, not by the HTTP
 // bootstrap path.
 func AllActive(db *sqlx.DB) ([]Record, error) {
 	const q = `
-        SELECT id, host, dsn, theme, status
+        SELECT id, host, dsn, theme, title, locale,
+               suspended_at, deleted_at, created_at, updated_at
         FROM   site
-        WHERE  status = 'Active'`
+        WHERE  suspended_at IS NULL
+          AND  deleted_at   IS NULL`
 	var rows []Record
 	if err := db.Select(&rows, q); err != nil {
 		return nil, err
@@ -36,15 +23,16 @@ func AllActive(db *sqlx.DB) ([]Record, error) {
 	return rows, nil
 }
 
-// ByHost fetches a single active site row by its host FQDN.  Callers pass a
-// context so the lookup respects request deadlines.  Returns (*Record,
-// nil) on success, or (nil, error).  The caller should translate sql.ErrNoRows
-// into its own domain-specific error (for example, tenant.ErrNotFound).
+// ByHost fetches a single site row that is not suspended or deleted.  The
+// caller supplies a context so the lookup respects request deadlines.
 func ByHost(ctx context.Context, db *sqlx.DB, host string) (*Record, error) {
 	const q = `
-        SELECT id, host, dsn, theme, status
+        SELECT id, host, dsn, theme, title, locale,
+               suspended_at, deleted_at, created_at, updated_at
         FROM   site
-        WHERE  host = ? AND status = 'Active'
+        WHERE  host = ?
+          AND  suspended_at IS NULL
+          AND  deleted_at   IS NULL
         LIMIT  1`
 	var rec Record
 	if err := db.GetContext(ctx, &rec, q, host); err != nil {
