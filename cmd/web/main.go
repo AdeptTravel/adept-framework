@@ -88,10 +88,12 @@ func main() {
 		host := stripPort(r.Host)
 
 		ten, err := cache.Get(host)
+
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
+
 		fmt.Fprintf(w, "Hello from %s (theme=%s)\n", ten.Meta.Host, ten.Meta.Theme)
 	})
 

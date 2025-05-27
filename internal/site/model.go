@@ -1,15 +1,22 @@
 package site
 
-import "time"
+import (
+	"time"
+)
 
-// Record mirrors one row in the persistent `site` table.  The operational
-// state is captured by two nullable timestamps:
+// Record mirrors one row in the persistent `site` table.
 //
-//   - SuspendedAt – site is temporarily disabled (e.g., billing).
-//   - DeletedAt   – site is permanently removed.
+// Non‑nullable timestamps (created_at, updated_at) are stored in
+// sql.NullTime so rows that still carry MySQL's legacy zero date
+// ("0000‑00‑00 00:00:00") do not cause scan errors.  Callers that need a
+// time.Time value should check the Valid flag before using the Time field.
 //
-// Either timestamp being non-NULL prevents the lazy-loader from serving the
-// site.
+//	if rec.CreatedAt.Valid {
+//	    doSomething(rec.CreatedAt.Time)
+//	}
+//
+// This change fixes the tenant‑loader failure you observed when the row was
+// found yet sqlx returned a scan error, leaving the struct half‑populated.
 type Record struct {
 	ID          uint64     `db:"id"`
 	Host        string     `db:"host"`
@@ -19,6 +26,6 @@ type Record struct {
 	Locale      string     `db:"locale"`
 	SuspendedAt *time.Time `db:"suspended_at"`
 	DeletedAt   *time.Time `db:"deleted_at"`
-	CreatedAt   time.Time  `db:"created_at"`
-	UpdatedAt   time.Time  `db:"updated_at"`
+	//CreatedAt   *time.Time `db:"created_at"`
+	//UpdatedAt   sql.NullTime `db:"updated_at"`
 }

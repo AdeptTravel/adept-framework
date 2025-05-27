@@ -1,0 +1,4 @@
+2025/05/23 14:40:27 logger.go:37: logger online (tee=false)
+2025/05/23 14:40:27 main.go:53: GLOBAL_DB_DSN is not set
+2025/05/23 14:40:51 logger.go:37: logger online (tee=false)
+2025/05/23 14:40:51 main.go:53: GLOBAL_DB_DSN is not set

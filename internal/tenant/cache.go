@@ -24,9 +24,9 @@ import (
 	"github.com/AdeptTravel/adept-framework/internal/metrics"
 )
 
-// --------------------------------------------------------------------
+//
 // Tunables
-// --------------------------------------------------------------------
+//
 
 const (
 	IdleTTL       = 30 * time.Minute // evict tenant after this idle duration
@@ -34,15 +34,15 @@ const (
 	EvictInterval = 5 * time.Minute  // evictor scan cadence
 )
 
-// --------------------------------------------------------------------
+//
 // Errors
-// --------------------------------------------------------------------
+//
 
 var ErrNotFound = errors.New("tenant not found")
 
-// --------------------------------------------------------------------
+//
 // Cache definition
-// --------------------------------------------------------------------
+//
 
 type Cache struct {
 	globalDB    *sqlx.DB

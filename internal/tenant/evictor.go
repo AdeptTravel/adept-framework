@@ -20,9 +20,9 @@ func (c *Cache) evictLoop() {
 		now := time.Now().UnixNano()
 		var count int
 
-		// ----------------------------------------------------------------
+		//
 		// Idle eviction pass
-		// ----------------------------------------------------------------
+		//
 		c.m.Range(func(key, value any) bool {
 			count++
 			ent := value.(*entry)
@@ -37,9 +37,9 @@ func (c *Cache) evictLoop() {
 			return true
 		})
 
-		// ----------------------------------------------------------------
+		//
 		// LRU eviction pass
-		// ----------------------------------------------------------------
+		//
 		if c.maxEntries > 0 && count > c.maxEntries {
 			type kv struct {
 				key string
