@@ -35,4 +35,10 @@ sites/*
 data/*
 
 # Log files
-logs/*
+log/*
+
+_*.*
+
+.vscode/
+
+sql/default.sql

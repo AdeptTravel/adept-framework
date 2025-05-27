@@ -29,7 +29,7 @@ func AllActive(db *sqlx.DB) ([]Record, error) {
 func ByHost(ctx context.Context, db *sqlx.DB, host string) (*Record, error) {
 
 	const q = `
-        SELECT id, host, dsn, theme, title, locale,
+        SELECT id, host, dsn, theme, title, locale, routing_mode,route_version,
                suspended_at, deleted_at
         FROM   site
         WHERE  host = ?
