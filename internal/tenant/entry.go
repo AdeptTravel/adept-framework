@@ -1,24 +1,27 @@
 package tenant
 
 import (
-	"github.com/AdeptTravel/adept-framework/internal/site"
+	"html/template"
+
 	"github.com/jmoiron/sqlx"
+
+	"github.com/AdeptTravel/adept-framework/internal/site"
+	"github.com/AdeptTravel/adept-framework/internal/theme"
 )
 
-// entry pairs a runtime Tenant with its last-seen timestamp.  The timestamp
-// is stored as UnixNano and updated atomically.
+// entry is the cache value: runtime Tenant plus last-seen timestamp.
 type entry struct {
 	tenant   *Tenant
 	lastSeen int64
 }
 
-// Tenant is what the HTTP layer uses after cache lookup.
+// Tenant wraps everything a request handler needs for one site.
 type Tenant struct {
-	Meta site.Record
-	DB   *sqlx.DB
+	Meta     site.Record        // site-table metadata
+	DB       *sqlx.DB           // per-tenant connection pool
+	Theme    *theme.Theme       // active theme (templates + assets)
+	Renderer *template.Template // convenience alias for Theme.Renderer
 }
 
-// Close shuts down the tenant’s connection pool.
-func (t *Tenant) Close() error {
-	return t.DB.Close()
-}
+// Close shuts down the tenant’s DB pool.
+func (t *Tenant) Close() error { return t.DB.Close() }
