@@ -2,7 +2,11 @@
 <html lang="en-us" dir="ltr" prefix="og: https://ogp.me/ns#">
 
 <head>
-  <title>Base Template</title>
+  {{ .Head.Title }}
+  {{ .Head.Metas }}
+  {{ .Head.Links }}
+  {{ .Head.Scripts }}
+  {{ .Head.JSON }}
 </head>
 
 <body>
