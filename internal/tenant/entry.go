@@ -9,19 +9,20 @@ import (
 	"github.com/AdeptTravel/adept-framework/internal/theme"
 )
 
-// entry is the cache value: runtime Tenant plus last-seen timestamp.
+// entry is the cache value stored in sync.Map.
 type entry struct {
 	tenant   *Tenant
 	lastSeen int64
 }
 
-// Tenant wraps everything a request handler needs for one site.
+// Tenant holds everything a handler needs for one site.
 type Tenant struct {
-	Meta     site.Record        // site-table metadata
-	DB       *sqlx.DB           // per-tenant connection pool
+	Meta     site.Record        // row from `site`
+	Config   map[string]string  // key-value from `site_config`
+	DB       *sqlx.DB           // per-site connection pool
 	Theme    *theme.Theme       // active theme (templates + assets)
-	Renderer *template.Template // convenience alias for Theme.Renderer
+	Renderer *template.Template // convenience alias to Theme.Renderer
 }
 
-// Close shuts down the tenant’s DB pool.
+// Close is called by the evictor on idle/LRU eviction.
 func (t *Tenant) Close() error { return t.DB.Close() }

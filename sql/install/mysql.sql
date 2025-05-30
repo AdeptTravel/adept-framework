@@ -7,28 +7,28 @@ CREATE TABLE `event_outbox` (
   KEY `idx_unpub` (`published_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS site;
+DROP TABLE IF EXISTS `site`;
 
-CREATE TABLE site (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  host          VARCHAR(256)  NOT NULL UNIQUE,
-  dsn           VARCHAR(512)  NOT NULL,
-  theme         VARCHAR(128)  NOT NULL DEFAULT 'base',
-  title         VARCHAR(256)  NOT NULL DEFAULT '',
-  locale        VARCHAR(16)   NOT NULL DEFAULT 'en_US',
-  routing_mode  VARCHAR(6)    NOT NULL DEFAULT 'path',
-  route_version INT           NOT NULL DEFAULT 0,
+CREATE TABLE `site` (
+  `id`            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `host`          VARCHAR(256)  NOT NULL UNIQUE,
+  `dsn`           VARCHAR(512)  NOT NULL,
+  `theme`         VARCHAR(128)  NOT NULL DEFAULT 'base',
+  `title`         VARCHAR(256)  NOT NULL DEFAULT '',
+  `locale`        VARCHAR(16)   NOT NULL DEFAULT 'en_US',
+  `routing_mode`  VARCHAR(6)    NOT NULL DEFAULT 'path',
+  `route_version` INT,           NOT NULL DEFAULT 0,
 
-  suspended_at  TIMESTAMP NULL,
-  deleted_at    TIMESTAMP NULL,
-  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `suspended_at`  TIMESTAMP NULL,
+  `deleted_at`    TIMESTAMP NULL,
+  `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Optional check constraint that both engines respect.
-ALTER TABLE site
-  ADD CONSTRAINT ck_site_routing_mode
-  CHECK (routing_mode IN ('path', 'mapped', 'mixed'));
+ALTER TABLE `site`
+  ADD CONSTRAINT `ck_site_routing_mode`
+  CHECK (`routing_mode` IN ('path', 'mapped', 'mixed'));
 
 
 
