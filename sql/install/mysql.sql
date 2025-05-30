@@ -8,17 +8,15 @@ CREATE TABLE `event_outbox` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `site`;
-
 CREATE TABLE `site` (
-  `id`            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  `id`            INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   `host`          VARCHAR(256)  NOT NULL UNIQUE,
   `dsn`           VARCHAR(512)  NOT NULL,
   `theme`         VARCHAR(128)  NOT NULL DEFAULT 'base',
   `title`         VARCHAR(256)  NOT NULL DEFAULT '',
   `locale`        VARCHAR(16)   NOT NULL DEFAULT 'en_US',
   `routing_mode`  VARCHAR(6)    NOT NULL DEFAULT 'path',
-  `route_version` INT,           NOT NULL DEFAULT 0,
-
+  `route_version` INT           NOT NULL DEFAULT 0,
   `suspended_at`  TIMESTAMP NULL,
   `deleted_at`    TIMESTAMP NULL,
   `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -30,7 +28,20 @@ ALTER TABLE `site`
   ADD CONSTRAINT `ck_site_routing_mode`
   CHECK (`routing_mode` IN ('path', 'mapped', 'mixed'));
 
+-- 20250530_create_site_config.sql
+DROP TABLE IF EXISTS site_config;
 
+CREATE TABLE `site_config` (
+  `site_id`  INT UNSIGNED NOT NULL,
+  `key`      VARCHAR(64)  NOT NULL,
+  `value`    TEXT         NOT NULL,
+
+  PRIMARY KEY (`site_id`, `key`),
+   CONSTRAINT fk_site_config_site
+      FOREIGN KEY (site_id)
+      REFERENCES site(id)
+      ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE  = utf8mb4_unicode_ci;
 
 
 -- ---------- core user record ----------

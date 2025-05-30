@@ -1,35 +1,33 @@
 // cmd/web/main.go
 //
-// Entry point for the Adept Framework HTTP server.
+// Adept Framework – HTTP entry point.
 //
-// Responsibilities
-// ----------------
+// Request life-cycle
+// ------------------
 //
-//   - Load environment variables (server-wide file, then .env for dev).
+//  1. Load env vars (jail-wide file → .env fallback).
 //
-//   - Initialise rotating logger (tees to console when running in a TTY).
+//  2. Start daily rotating logger (tees to console when running in a TTY).
 //
-//   - Connect to the global control-plane database and print the count of
-//     active sites as an early sanity check.
+//  3. Open global control-plane DB and log active-site count.
 //
-//   - Build the tenant cache (lazy-loads each site on first request).
+//  4. Build tenant-cache (lazy-loads each site on first hit).
 //
-//   - Register Prometheus metrics endpoint.
+//  5. Expose Prometheus /metrics endpoint.
 //
-//   - Wrap the root handler with middleware.ForceHTTPS so every non-localhost
-//     host is 308-redirected to HTTPS when hit over plain HTTP.
+//  6. Build the root handler and wrap it with ForceHTTPS middleware
+//     so every non-localhost HTTP request is 308-redirected to HTTPS.
 //
-//   - Root handler:
+//  7. Root-handler flow:
 //
-//     – Looks up the tenant.
-//     – Builds a per-request tenant.Context (includes head.Builder).
-//     – Seeds the page <title> from site.Record.Title.
-//     – Adds two example head tags (charset + favicon).
-//     – Renders themes/base/templates/home.html.
+//     • tenant lookup            – cache.Get(host)
+//     • per-request Context      – head.Builder + URLInfo + UA
+//     • default <title>          – site.Record.Title
+//     • module dispatch          – module.Lookup(path)
+//     • fallback template render – home.html
 //
-// Style guide
-// -----------
-// Blank “//” lines frame large blocks; inline comments use a single “//”.
+// Large comment blocks are framed by blank “//” lines; inline comments use
+// a single “//”.
 package main
 
 import (
@@ -44,7 +42,11 @@ import (
 	"github.com/AdeptTravel/adept-framework/internal/database"
 	"github.com/AdeptTravel/adept-framework/internal/logger"
 	"github.com/AdeptTravel/adept-framework/internal/middleware"
+	"github.com/AdeptTravel/adept-framework/internal/module"
 	"github.com/AdeptTravel/adept-framework/internal/tenant"
+	"github.com/AdeptTravel/adept-framework/internal/viewhelpers"
+
+	_ "github.com/AdeptTravel/adept-framework/modules/debug" // demo module
 )
 
 const (
@@ -52,8 +54,7 @@ const (
 	listenAddr    = ":8080"
 )
 
-// loadEnv loads environment variables from a jail-wide file first, then
-// falls back to .env in the working directory (dev workflow).
+// loadEnv prefers the jail-wide env file; on dev it falls back to .env.
 func loadEnv() {
 	if _, err := os.Stat(serverEnvPath); err == nil {
 		_ = godotenv.Load(serverEnvPath)
@@ -62,7 +63,7 @@ func loadEnv() {
 	_ = godotenv.Load()
 }
 
-// runningInTTY lets the logger decide whether to tee to stdout.
+// runningInTTY returns true when stdout is a character device.
 func runningInTTY() bool {
 	fi, err := os.Stdout.Stat()
 	if err != nil {
@@ -81,7 +82,7 @@ func main() {
 	}
 
 	//
-	// Connect to global control-plane database.
+	// ── 1.  Global DB connect ───────────────────────────────────────────
 	//
 	dsn := os.Getenv("GLOBAL_DB_DSN")
 	if dsn == "" {
@@ -95,25 +96,25 @@ func main() {
 	defer globalDB.Close()
 	logOut.Println("global DB online")
 
-	// Log the number of active sites to confirm correct DB selection.
+	// Log active-site count as an early sanity check.
 	var active int
 	_ = globalDB.Get(&active, `
 	    SELECT COUNT(*) FROM site
 	    WHERE suspended_at IS NULL AND deleted_at IS NULL`)
-	logOut.Printf("%d active site(s) found in site table", active)
+	logOut.Printf("%d active site(s) found", active)
 
 	//
-	// Tenant cache (lazy-loads a site on first request).
+	// ── 2.  Tenant cache (lazy site loader) ─────────────────────────────
 	//
 	cache := tenant.New(globalDB, tenant.IdleTTL, tenant.MaxEntries, logOut)
 
 	//
-	// Metrics endpoint (no middleware).
+	// ── 3.  Metrics endpoint ────────────────────────────────────────────
 	//
 	http.Handle("/metrics", promhttp.Handler())
 
 	//
-	// Root handler wrapped with ForceHTTPS(middleware).
+	// ── 4.  Root handler: tenant lookup → module dispatch → render ─────
 	//
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
@@ -124,32 +125,44 @@ func main() {
 			return
 		}
 
+		// Register UA helpers once per renderer instance (idempotent).
+		ten.Renderer.Funcs(viewhelpers.FuncMap())
+
 		//
-		// Build per-request context and seed head defaults.
+		// Build per-request Context and seed head defaults.
 		//
 		ctx := tenant.NewContext(r)
 
-		// Default <title> from site.Record.Title; modules may override.
 		if ten.Meta.Title != "" {
 			ctx.Head.SetTitle(ten.Meta.Title)
 		}
-
-		// Example core tags; modules will push more as needed.
 		ctx.Head.Meta(`<meta charset="utf-8">`)
 		ctx.Head.Link(`<link rel="icon" href="/favicon.ico">`)
 
-		data := map[string]any{
-			"Ctx":  ctx,      // placeholder for future helpers
-			"Head": ctx.Head, // theme base layout prints Head slices
+		//
+		// Module dispatch – exact path match (e.g., /debug).
+		//
+		if h := module.Lookup(r.URL.Path); h != nil {
+			h(ten, ctx, w, r)
+			return
 		}
 
+		//
+		// Fallback: render home.html via theme renderer.
+		//
+		data := map[string]any{
+			"Ctx":  ctx,
+			"Head": ctx.Head,
+		}
 		if err := ten.Renderer.ExecuteTemplate(w, "home.html", data); err != nil {
 			logOut.Printf("render error: %v", err)
 			http.Error(w, "template error", http.StatusInternalServerError)
 		}
 	})
 
-	// Register root with HTTPS-force middleware (skips localhost).
+	//
+	// ── 5.  Wrap with HTTPS-enforcement middleware (skip localhost) ────
+	//
 	http.Handle("/", middleware.ForceHTTPS(cache, root))
 
 	logOut.Printf("listening on %s", listenAddr)
@@ -158,7 +171,7 @@ func main() {
 	}
 }
 
-// stripPort removes :port from the Host header when present.
+// stripPort removes any “:port” suffix from the Host header.
 func stripPort(h string) string {
 	if i := strings.IndexByte(h, ':'); i != -1 {
 		return h[:i]
