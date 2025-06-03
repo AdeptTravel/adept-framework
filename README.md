@@ -1,6 +1,6 @@
 # Adept Framework
 
-The Adept Framework is a Go‑based, multi‑tenant web platform engineered for travel‑industry workloads.  It serves many independent sites from a single binary, lazy‑loads each site’s resources on the first request, and evicts idle tenants to keep resource usage low.  The project is developed on FreeBSD jails, but it runs anywhere Go 1.24+ is available.
+The Adept Framework is a Go‑based, multi‑tenant web platform engineered for adept‑industry workloads.  It serves many independent sites from a single binary, lazy‑loads each site’s resources on the first request, and evicts idle tenants to keep resource usage low.  The project is developed on FreeBSD jails, but it runs anywhere Go 1.24+ is available.
 
 ---
 
@@ -18,8 +18,8 @@ The Adept Framework is a Go‑based, multi‑tenant web platform engineered for
 
 ```bash
 # Clone and build
-git clone https://github.com/AdeptTravel/adept-framework.git
-cd adept-framework
+git clone https://github.com/yanizio/adept.git
+cd adept
 go mod tidy
 go build ./cmd/web
 
@@ -69,7 +69,7 @@ sql/                  # schema and migrations
 
 ```bash
 sudo pkg install go git
-cd /opt/adept-framework
+cd /opt/adept
 make build
 service adept_web start
 ```

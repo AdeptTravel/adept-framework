@@ -1,11 +1,11 @@
-module github.com/AdeptTravel/adept-framework
+module github.com/yanizio/adept
 
 go 1.24
 
 // DELETE the self-require line.  You are the module.
-// require github.com/AdeptTravel/adept-framework v0.0.0-00010101000000-000000000000
+// require github.com/yaniz.io/adept v0.0.0-00010101000000-000000000000
 
-replace github.com/AdeptTravel/adept-framework => .
+replace github.com/yanizio/adept => .
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1

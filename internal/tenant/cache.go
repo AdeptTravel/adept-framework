@@ -21,7 +21,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/AdeptTravel/adept-framework/internal/metrics"
+	"github.com/yanizio/adept/internal/metrics"
 )
 
 //

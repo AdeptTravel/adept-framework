@@ -6,9 +6,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/AdeptTravel/adept-framework/internal/database"
-	"github.com/AdeptTravel/adept-framework/internal/site"
-	"github.com/AdeptTravel/adept-framework/internal/theme"
+	"github.com/yanizio/adept/internal/database"
+	"github.com/yanizio/adept/internal/site"
+	"github.com/yanizio/adept/internal/theme"
 )
 
 // loadSite turns host → *Tenant.  Steps:

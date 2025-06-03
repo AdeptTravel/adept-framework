@@ -5,8 +5,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/AdeptTravel/adept-framework/internal/site"
-	"github.com/AdeptTravel/adept-framework/internal/theme"
+	"github.com/yanizio/adept/internal/site"
+	"github.com/yanizio/adept/internal/theme"
 )
 
 // entry is the cache value stored in sync.Map.

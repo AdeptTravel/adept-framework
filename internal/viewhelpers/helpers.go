@@ -12,7 +12,7 @@ package viewhelpers
 import (
 	"html/template"
 
-	"github.com/AdeptTravel/adept-framework/internal/tenant"
+	"github.com/yanizio/adept/internal/tenant"
 )
 
 // FuncMap returns UA helpers keyed off *tenant.Context.

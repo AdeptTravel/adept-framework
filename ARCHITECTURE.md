@@ -17,7 +17,7 @@ The Adept Framework is a multi-tenant Go web platform designed to serve many ind
 
 1. **Startup**
 
-   1. Load environment variables from `/usr/local/etc/adept-framework/global.env`, else `.env`.
+   1. Load environment variables from `/usr/local/etc/adept/global.env`, else `.env`.
    2. Connect to the global control-plane database using `GLOBAL_DB_DSN`.
    3. Construct a `tenant.Cache` with default Idle TTL (30 minutes) and Max Entries (100).
 2. **Request Handling**

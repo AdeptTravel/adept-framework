@@ -8,8 +8,8 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/AdeptTravel/adept-framework/internal/module"
-	"github.com/AdeptTravel/adept-framework/internal/tenant"
+	"github.com/yanizio/adept/internal/module"
+	"github.com/yanizio/adept/internal/tenant"
 )
 
 func init() {

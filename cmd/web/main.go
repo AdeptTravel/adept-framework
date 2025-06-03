@@ -39,18 +39,18 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/AdeptTravel/adept-framework/internal/database"
-	"github.com/AdeptTravel/adept-framework/internal/logger"
-	"github.com/AdeptTravel/adept-framework/internal/middleware"
-	"github.com/AdeptTravel/adept-framework/internal/module"
-	"github.com/AdeptTravel/adept-framework/internal/tenant"
-	"github.com/AdeptTravel/adept-framework/internal/viewhelpers"
+	"github.com/yanizio/adept/internal/database"
+	"github.com/yanizio/adept/internal/logger"
+	"github.com/yanizio/adept/internal/middleware"
+	"github.com/yanizio/adept/internal/module"
+	"github.com/yanizio/adept/internal/tenant"
+	"github.com/yanizio/adept/internal/viewhelpers"
 
-	_ "github.com/AdeptTravel/adept-framework/modules/debug" // demo module
+	_ "github.com/yanizio/adept/modules/debug" // demo module
 )
 
 const (
-	serverEnvPath = "/usr/local/etc/adept-framework/global.env"
+	serverEnvPath = "/usr/local/etc/adept/global.env"
 	listenAddr    = ":8080"
 )
 

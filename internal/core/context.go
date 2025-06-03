@@ -9,8 +9,8 @@ package core
 import (
 	"net/http"
 
-	"github.com/adepttravel/adept-framework/internal/requestinfo"
-	"github.com/adepttravel/adept-framework/internal/tenant"
+	"github.com/yanizio/adept/internal/requestinfo"
+	"github.com/yanizio/adept/internal/tenant"
 )
 
 type Context struct {

@@ -3,8 +3,8 @@ package tenant
 import (
 	"net/http"
 
-	"github.com/AdeptTravel/adept-framework/internal/head"
-	"github.com/AdeptTravel/adept-framework/internal/ua" // 👈 new import
+	"github.com/yanizio/adept/internal/head"
+	"github.com/yanizio/adept/internal/ua" // 👈 new import
 )
 
 type Context struct {

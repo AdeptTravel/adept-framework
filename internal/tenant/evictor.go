@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/AdeptTravel/adept-framework/internal/metrics"
+	"github.com/yanizio/adept/internal/metrics"
 )
 
 func (c *Cache) evictLoop() {

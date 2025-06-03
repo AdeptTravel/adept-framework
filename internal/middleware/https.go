@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/AdeptTravel/adept-framework/internal/tenant"
+	"github.com/yanizio/adept/internal/tenant"
 )
 
 // ForceHTTPS wraps h.  If the request is plain HTTP, the host is not

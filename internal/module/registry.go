@@ -17,7 +17,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/AdeptTravel/adept-framework/internal/tenant"
+	"github.com/yanizio/adept/internal/tenant"
 )
 
 // Handler is what modules register.
