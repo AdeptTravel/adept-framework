@@ -1,0 +1,6 @@
+http:
+  listen_addr: ":8080"
+  force_https: true
+
+database:
+  global_dsn: "adept:1b1H4RgKfFvx1ifk@tcp(127.0.0.1:3306)/adept"

@@ -5,14 +5,14 @@
 // Request life-cycle
 // ------------------
 //
-//  1. Load env vars (jail-wide file → .env fallback).
-//  2. Start daily rotating logger (tees to console when running in a TTY).
-//  3. Open global control-plane DB and log active-site count.
-//  4. Build tenant-cache (lazy-loads each site on first hit).
-//  5. Expose Prometheus /metrics endpoint.
-//  6. Build the root handler and wrap it with ForceHTTPS middleware so every
-//     non-localhost HTTP request is 308-redirected to HTTPS.
-//  7. Root-handler flow:
+//  0. Load configuration (dotenv → YAML → env) via internal/config.
+//  1. Start daily rotating logger (tees to console when running in a TTY).
+//  2. Open global control-plane DB and log active-site count.
+//  3. Build tenant cache (lazy-loads each site on first hit).
+//  4. Expose Prometheus /metrics endpoint.
+//  5. Build the root handler and wrap it with ForceHTTPS middleware
+//     when cfg.HTTP.ForceHTTPS is true.
+//  6. Root-handler flow:
 //     • tenant lookup            – cache.Get(host)
 //     • per-request Context      – Head builder, URLInfo, UA
 //     • default <title>          – host name
@@ -26,9 +26,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/yanizio/adept/internal/config"
 	"github.com/yanizio/adept/internal/database"
 	"github.com/yanizio/adept/internal/logger"
 	"github.com/yanizio/adept/internal/middleware"
@@ -37,34 +37,22 @@ import (
 	"github.com/yanizio/adept/internal/viewhelpers"
 )
 
-const (
-	serverEnvPath = "/usr/local/etc/adept/global.env"
-	listenAddr    = ":8080"
-)
-
-// loadEnv prefers the jail-wide env file; on dev it falls back to .env.
-func loadEnv() {
-	if _, err := os.Stat(serverEnvPath); err == nil {
-		_ = godotenv.Load(serverEnvPath)
-		return
-	}
-	_ = godotenv.Load()
-}
-
 // runningInTTY returns true when stdout is a character device.
 func runningInTTY() bool {
 	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-func init() { loadEnv() }
-
 func main() {
-	rootDir, _ := os.Getwd()
-	logOut, err := logger.New(rootDir, runningInTTY())
+	//
+	// ── 0.  Load configuration ─────────────────────────────────────────
+	//
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+
+	logOut, err := logger.New(cfg.Paths.Root, runningInTTY())
 	if err != nil {
 		log.Fatalf("start logger: %v", err)
 	}
@@ -72,12 +60,8 @@ func main() {
 	//
 	// ── 1.  Global DB connect ───────────────────────────────────────────
 	//
-	dsn := os.Getenv("GLOBAL_DB_DSN")
-	if dsn == "" {
-		logOut.Fatal("GLOBAL_DB_DSN is not set")
-	}
 	logOut.Println("connecting to global DB …")
-	globalDB, err := database.Open(dsn)
+	globalDB, err := database.Open(cfg.Database.GlobalDSN)
 	if err != nil {
 		logOut.Fatalf("connect global DB: %v", err)
 	}
@@ -121,12 +105,12 @@ func main() {
 		//
 		ctx := tenant.NewContext(r)
 
-		ctx.Head.SetTitle(host) // use host as default title
+		ctx.Head.SetTitle(host) // default title = host name
 		ctx.Head.Meta(`<meta charset="utf-8">`)
 		ctx.Head.Link(`<link rel="icon" href="/favicon.ico">`)
 
 		//
-		// Component dispatch – exact path match (e.g., /debug).
+		// Component dispatch – exact path match.
 		//
 		if h := module.Lookup(r.URL.Path); h != nil {
 			h(ten, ctx, w, r)
@@ -149,10 +133,14 @@ func main() {
 	//
 	// ── 5.  Wrap with HTTPS-enforcement middleware (skip localhost) ────
 	//
-	http.Handle("/", middleware.ForceHTTPS(cache, root))
+	var handler http.Handler = root
+	if cfg.HTTP.ForceHTTPS {
+		handler = middleware.ForceHTTPS(cache, root)
+	}
+	http.Handle("/", handler)
 
-	logOut.Printf("listening on %s", listenAddr)
-	if err := http.ListenAndServe(listenAddr, nil); err != nil {
+	logOut.Printf("listening on %s", cfg.HTTP.ListenAddr)
+	if err := http.ListenAndServe(cfg.HTTP.ListenAddr, nil); err != nil {
 		logOut.Fatalf("http server: %v", err)
 	}
 }
