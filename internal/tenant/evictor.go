@@ -1,10 +1,27 @@
-// evictor.go houses the eviction loop for Cache.  Every EvictInterval it
-// scans the map and removes:
+// internal/tenant/evictor.go
 //
-//   - tenants idle longer than idleTTL
-//   - least-recently-used tenants when map size exceeds maxEntries
+// Background eviction loop for Tenant cache.
 //
-// Each eviction event is logged and updates Prometheus counters.
+// Context
+// -------
+// The Tenant cache uses an `entry` wrapper that records `lastSeen`.  A
+// single goroutine—started by `Cache.New()`—wakes every `EvictInterval`
+// and prunes the map in two passes:
+//
+//   - **Idle eviction** — remove tenants idle longer than `idleTTL`.
+//   - **LRU eviction**  — if the map still exceeds `maxEntries`, remove the
+//     oldest entries until the cap is met.
+//
+// Each eviction closes the tenant’s DB pool, logs the event, and updates
+// Prometheus metrics.
+//
+// Notes
+// -----
+//   - All map operations use `sync.Map` APIs; no additional locks needed.
+//   - `metrics.TenantEvictTotal` and `metrics.ActiveTenants` gauge are
+//     updated in-line.  This file imports only `time` and `sort` plus the
+//     metrics package.
+//   - Oxford commas, two spaces after periods, no m-dash.
 package tenant
 
 import (
@@ -52,6 +69,7 @@ func (c *Cache) evictLoop() {
 				return true
 			})
 			sort.Slice(all, func(i, j int) bool { return all[i].at < all[j].at })
+
 			for i := 0; i < count-c.maxEntries; i++ {
 				if v, ok := c.m.Load(all[i].key); ok {
 					_ = v.(*entry).tenant.Close()

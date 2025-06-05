@@ -13,22 +13,28 @@ CREATE TABLE `site` (
   `host`          VARCHAR(256)  NOT NULL UNIQUE,
   `dsn`           VARCHAR(512)  NOT NULL,
   `theme`         VARCHAR(128)  NOT NULL DEFAULT 'base',
-  `title`         VARCHAR(256)  NOT NULL DEFAULT '',
   `locale`        VARCHAR(16)   NOT NULL DEFAULT 'en_US',
   `routing_mode`  VARCHAR(6)    NOT NULL DEFAULT 'path',
   `route_version` INT           NOT NULL DEFAULT 0,
+  `preload`       TINYINT(1)    NOT NULL DEFAULT 0,
   `suspended_at`  TIMESTAMP NULL,
   `deleted_at`    TIMESTAMP NULL,
   `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Optional check constraint that both engines respect.
-ALTER TABLE `site`
-  ADD CONSTRAINT `ck_site_routing_mode`
-  CHECK (`routing_mode` IN ('path', 'mapped', 'mixed'));
+CREATE OR REPLACE VIEW site_status_v AS
+SELECT
+    id,
+    host,
+    CASE
+        WHEN deleted_at  IS NOT NULL THEN 'deleted'
+        WHEN suspended_at IS NOT NULL THEN 'suspended'
+        ELSE 'ok'
+    END AS status
+FROM site;
 
--- 20250530_create_site_config.sql
+
 DROP TABLE IF EXISTS site_config;
 
 CREATE TABLE `site_config` (

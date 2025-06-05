@@ -6,27 +6,18 @@
 // ------------------
 //
 //  1. Load env vars (jail-wide file → .env fallback).
-//
 //  2. Start daily rotating logger (tees to console when running in a TTY).
-//
 //  3. Open global control-plane DB and log active-site count.
-//
 //  4. Build tenant-cache (lazy-loads each site on first hit).
-//
 //  5. Expose Prometheus /metrics endpoint.
-//
-//  6. Build the root handler and wrap it with ForceHTTPS middleware
-//     so every non-localhost HTTP request is 308-redirected to HTTPS.
-//
+//  6. Build the root handler and wrap it with ForceHTTPS middleware so every
+//     non-localhost HTTP request is 308-redirected to HTTPS.
 //  7. Root-handler flow:
-//
 //     • tenant lookup            – cache.Get(host)
-//     • per-request Context      – head.Builder + URLInfo + UA
-//     • default <title>          – site.Record.Title
-//     • module dispatch          – module.Lookup(path)
+//     • per-request Context      – Head builder, URLInfo, UA
+//     • default <title>          – host name
+//     • component dispatch       – module.Lookup(path)
 //     • fallback template render – home.html
-//
-
 package main
 
 import (
@@ -44,8 +35,6 @@ import (
 	"github.com/yanizio/adept/internal/module"
 	"github.com/yanizio/adept/internal/tenant"
 	"github.com/yanizio/adept/internal/viewhelpers"
-
-	_ "github.com/yanizio/adept/components/debug" // demo module
 )
 
 const (
@@ -113,7 +102,7 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 
 	//
-	// ── 4.  Root handler: tenant lookup → module dispatch → render ─────
+	// ── 4.  Root handler: tenant lookup → component dispatch → render ───
 	//
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
@@ -132,14 +121,12 @@ func main() {
 		//
 		ctx := tenant.NewContext(r)
 
-		if ten.Meta.Title != "" {
-			ctx.Head.SetTitle(ten.Meta.Title)
-		}
+		ctx.Head.SetTitle(host) // use host as default title
 		ctx.Head.Meta(`<meta charset="utf-8">`)
 		ctx.Head.Link(`<link rel="icon" href="/favicon.ico">`)
 
 		//
-		// Module dispatch – exact path match (e.g., /debug).
+		// Component dispatch – exact path match (e.g., /debug).
 		//
 		if h := module.Lookup(r.URL.Path); h != nil {
 			h(ten, ctx, w, r)

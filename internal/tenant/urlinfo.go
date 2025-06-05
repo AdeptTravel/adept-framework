@@ -1,17 +1,29 @@
-// urlinfo.go
+// internal/tenant/urlinfo.go
 //
-// URLInfo captures only the fields requested:
+// Canonicalised URL snapshot.
 //
-//   - Host   – r.Host without the :port suffix.
-//   - Route  – the URL path stripped of leading/trailing “/”.  Root ("/")
-//     becomes the empty string.
-//   - Ext    – file extension from the path (empty when absent).
-//   - MIME   – mime.TypeByExtension(Ext).  Empty string when Ext == "".
-//   - QueryRaw, Query, Fragment – unchanged from *url.URL.
+// Context
+// -------
+// Components and Widgets often need only the clean path, file extension,
+// or query map—*not* the full `*url.URL` with scheme, raw path, and port.
+// `URLInfo` captures just the fields requested by the architecture notes:
 //
-// These keys are enough for modules and widgets to derive canonical URLs,
-// file types, and routing context without the extra noise of scheme,
-// directory, or isHTTPS.
+//   - Host      — `r.Host` without the `:port` suffix.
+//   - Route     — path trimmed of leading/trailing “/”; root (“/”) → ""
+//   - Ext       — file extension (e.g., “.html” or “.jpg”).
+//   - MIME      — result of `mime.TypeByExtension(Ext)`; empty when Ext = "".
+//   - QueryRaw  — raw query string (`RawQuery`).
+//   - Query     — parsed `url.Values`.
+//   - Fragment  — URL fragment without the “#”.
+//
+// These keys let downstream code derive canonical URLs and
+// content-type hints without duplicating string parsing.
+//
+// Notes
+// -----
+//   - `URLInfo` is stored inside `tenant.Context` and therefore lives for
+//     exactly one HTTP request.
+//   - Oxford commas, two spaces after periods, no m-dash.
 package tenant
 
 import (
@@ -22,24 +34,21 @@ import (
 	"strings"
 )
 
-// URLInfo is stored in tenant.Context.
+// URLInfo is attached to tenant.Context and exposed to templates.
 type URLInfo struct {
-	Host     string     // blog.example.com
+	Host     string     // "blog.example.com"
 	Route    string     // "blog/2025/05" from path "/blog/2025/05"
 	Ext      string     // ".html"
 	MIME     string     // "text/html"
 	QueryRaw string     // "tag=go"
-	Query    url.Values // parsed query args
+	Query    url.Values // Parsed query args
 	Fragment string     // "top"
 }
 
 // newURLInfo builds URLInfo from the incoming request.
 func newURLInfo(r *http.Request) URLInfo {
 	host := stripPort(r.Host)
-
-	// Derive Route by trimming leading/trailing slashes from the path.
-	route := strings.Trim(r.URL.Path, "/")
-
+	route := strings.Trim(r.URL.Path, "/") // "" when root
 	ext := filepath.Ext(r.URL.Path)
 	mimeType := mime.TypeByExtension(ext)
 
@@ -54,7 +63,7 @@ func newURLInfo(r *http.Request) URLInfo {
 	}
 }
 
-// stripPort removes :port from the Host header when present.
+// stripPort removes the :port suffix from Host when present.
 func stripPort(h string) string {
 	if i := strings.IndexByte(h, ':'); i != -1 {
 		return h[:i]
