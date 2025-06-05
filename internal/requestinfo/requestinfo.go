@@ -1,15 +1,24 @@
+// internal/requestinfo/requestinfo.go
 //
-//  internal/requestinfo/requestinfo.go
+// Request metadata collector.
 //
-//  Lightweight types and helpers that collect per-request metadata
-//  (user-agent fingerprint, IP + geolocation, URL, and timestamp).
-//  These structs are inert.  They contain no pointers to database
-//  handles or large buffers, so they are safe to log or JSON-encode.
+// Context
+// -------
+// This package provides inert structs (`RequestInfo`, `UA`, `Geo`) plus helper
+// functions that enrich an incoming HTTP request with user-agent details,
+// geolocation hints (MaxMind GeoLite 2), and a timestamp.  The structs carry
+// **no** database handles or large buffers, so they are safe to log, JSON-encode,
+// or attach to `context.Context`.
 //
-//  Dependencies
-//  • github.com/avct/uasurfer/v4     (UA parsing)
-//  • github.com/oschwald/geoip2-golang (MaxMind lookup)
-//
+// Workflow
+// --------
+//  1. `InitGeo` is called at boot with the path to GeoLite2-City.  It opens a
+//     singleton reader (`geoReader`) which is thread-safe for look-ups.
+//  2. Middleware (not in this file) parses the User-Agent header with
+//     `uasurfer.Parse`, resolves the client IP’s geo record, and stores a
+//     `*RequestInfo` value in `context.Context` under an unexported key.
+//  3. Handlers, Components, or Widgets call `requestinfo.FromContext()` to
+//     retrieve the struct and render analytics attributes or template variables.
 
 package requestinfo
 
@@ -21,14 +30,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/avct/uasurfer/v4"
+	"github.com/avct/uasurfer"
 	"github.com/oschwald/geoip2-golang"
 )
 
 //
-//  -----------------------------
 //  Struct definitions
-//  -----------------------------
 //
 
 // UA holds the parsed user-agent properties requested by Brandon.
@@ -39,21 +46,20 @@ type UA struct {
 	OS          string // "macOS", "Windows", "Android", "iOS", etc.
 	OSVersion   string // "14.5", "11", "10.0"
 	Device      string // "Desktop", "Phone", "Tablet", "TV", ...
-	Platform    string // "Mac", "Windows", "Linux", "iPad", "iPhone", ...
+	Platform    string // "Mac", "Windows", "Linux", "iPad", ...
 	IsBot       bool   // True if UA matches ~18 000 crawler signatures
 	PrimaryLang string // First tag from Accept-Language ("en", "es", ...)
 }
 
 // Geo holds IP-based geolocation hints.
-// These are best-effort and may be empty if the DB has no match.
 type Geo struct {
 	IP         net.IP // Original client address (not X-Forwarded-For chain)
 	CountryISO string // "US", "CA", "FR", ...
 	City       string // "Chicago", "Paris", ...
 }
 
-// RequestInfo is attached to the project’s Context type and is
-// therefore visible to modules, widgets, and templates.
+// RequestInfo is attached to the project’s Context type and is therefore
+// visible to Components, Widgets, and templates.
 type RequestInfo struct {
 	UA        UA
 	Geo       Geo
@@ -62,17 +68,13 @@ type RequestInfo struct {
 }
 
 //
-//  -----------------------------
 //  Package-level state
-//  -----------------------------
 //
 
-// geoReader is a singleton MaxMind handle.  It is safe for concurrent
-// reads, which is all we ever perform.
+// geoReader is a singleton MaxMind handle.  It is safe for concurrent reads.
 var geoReader *geoip2.Reader
 
-// InitGeo opens the GeoLite2-City database at startup.  It must be
-// called from main() or an init() in cmd/web or the server will panic.
+// InitGeo opens the GeoLite2-City database at startup.  Call from main().
 func InitGeo(dbPath string) {
 	var err error
 	geoReader, err = geoip2.Open(dbPath)
@@ -82,38 +84,28 @@ func InitGeo(dbPath string) {
 }
 
 //
-//  -----------------------------
 //  Public helper: FromContext
-//  -----------------------------
-//
-//  The Enrich middleware stores *RequestInfo inside net/context so that
-//  any code holding only http.Request can still retrieve the struct
-//  without reference to the project’s custom Context.
 //
 
-type ctxKey struct{} // unexported, collision-proof
+type ctxKey struct{}
 
-// FromContext returns the pointer previously stored by Enrich.
-// It returns nil if the middleware has not run.
 func FromContext(ctx context.Context) *RequestInfo {
 	v, _ := ctx.Value(ctxKey{}).(*RequestInfo)
 	return v
 }
 
 //
-//  -----------------------------
 //  Internal helpers
-//  -----------------------------
 //
 
 // parseUA converts a raw header into our UA struct using uasurfer.
 func parseUA(uaHeader, acceptLang string) UA {
 	u := uasurfer.Parse(uaHeader)
 
-	// Browser family string
+	// Browser family
 	br := strings.TrimPrefix(u.Browser.Name.String(), "Browser")
 
-	// Browser version "major.minor.patch" (trim trailing ".0")
+	// Browser version "major.minor.patch"
 	brVer := trimVersion(u.Browser.Version)
 
 	// OS name and version
@@ -126,8 +118,8 @@ func parseUA(uaHeader, acceptLang string) UA {
 	// Device class
 	device := deviceTypeToString(u.DeviceType)
 
-	// Platform string ("Mac", "Windows", ...)
-	platform := strings.TrimPrefix(u.Platform.String(), "Platform")
+	// Platform string via OS.Platform (uasurfer ≈2.x)
+	platform := strings.TrimPrefix(u.OS.Platform.String(), "Platform")
 
 	return UA{
 		Raw:         uaHeader,
@@ -137,7 +129,7 @@ func parseUA(uaHeader, acceptLang string) UA {
 		OSVersion:   osVer,
 		Device:      device,
 		Platform:    platform,
-		IsBot:       u.IsBot,
+		IsBot:       u.IsBot(),
 		PrimaryLang: primaryLang(acceptLang),
 	}
 }
@@ -148,13 +140,13 @@ func trimVersion(v uasurfer.Version) string {
 		strings.TrimSuffix(
 			strings.TrimSuffix(
 				strings.Join([]string{
-					intToStr(v.Major),
-					intToStr(v.Minor),
-					intToStr(v.Patch),
+					intToStr(uint64(v.Major)),
+					intToStr(uint64(v.Minor)),
+					intToStr(uint64(v.Patch)),
 				}, "."),
-				".0",
-			), ".0",
-		), ".0",
+				".0"),
+			".0"),
+		".0",
 	)
 	if out == "" {
 		return "0"
@@ -162,7 +154,7 @@ func trimVersion(v uasurfer.Version) string {
 	return out
 }
 
-// intToStr converts version ints to strings without forcing import fmt.
+// intToStr converts uint64 to string.
 func intToStr(i uint64) string {
 	return strconv.FormatUint(i, 10)
 }
@@ -182,8 +174,6 @@ func deviceTypeToString(dt uasurfer.DeviceType) string {
 		return "Wearable"
 	case uasurfer.DeviceTV:
 		return "TV"
-	case uasurfer.DeviceBot:
-		return "Bot"
 	default:
 		return "Unknown"
 	}

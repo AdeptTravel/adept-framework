@@ -1,6 +1,6 @@
 // cmd/web/main.go
 //
-// Adept Framework – HTTP entry point.
+// Adept – HTTP entry point.
 //
 // Request life-cycle
 // ------------------
@@ -26,8 +26,7 @@
 //     • module dispatch          – module.Lookup(path)
 //     • fallback template render – home.html
 //
-// Large comment blocks are framed by blank “//” lines; inline comments use
-// a single “//”.
+
 package main
 
 import (
@@ -46,7 +45,7 @@ import (
 	"github.com/yanizio/adept/internal/tenant"
 	"github.com/yanizio/adept/internal/viewhelpers"
 
-	_ "github.com/yanizio/adept/modules/debug" // demo module
+	_ "github.com/yanizio/adept/components/debug" // demo module
 )
 
 const (
