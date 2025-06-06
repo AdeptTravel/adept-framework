@@ -1,88 +1,103 @@
 # Adept Framework
 
-The Adept Framework is a Go‑based, multi‑tenant web platform engineered for adept‑industry workloads.  It serves many independent sites from a single binary, lazy‑loads each site’s resources on the first request, and evicts idle tenants to keep resource usage low.  The project is developed on FreeBSD jails, but it runs anywhere Go 1.24+ is available.
+Adept is a Go‑native, FreeBSD‑friendly **multi‑tenant** web and API platform.  It runs many independent sites from a single binary, lazy‑loads each tenant on the first request, and evicts idle ones to keep memory usage low.  A unified *API* layer and provider‑agnostic *AI* helpers let Components call external services (OpenAI, SendGrid, …) with one line of code.
 
 ---
 
 ## Features
 
-* **Lazy‑loaded tenants** – Sites are loaded on first hit, with idle‑TTL and LRU eviction.
-* **Per‑tenant database pools** capped at five open connections.
-* **Prometheus metrics** on `/metrics`.
-* **Pluggable AI and third‑party API adapters** (scaffold stage).
-* **Future‑ready for Vault secrets** and Cockroach multi‑region clusters.
+* **Lazy‑loaded tenants** — cold loads on first hit, idle‑TTL + LRU eviction.
+* **Per‑tenant DB pools** capped at five connections, DSN pulled from Vault or table.
+* **Structured logging, metrics, tracing** — Zap JSON logs, Prometheus `/metrics`, OTEL spans.
+* **Security engine** — host/IP/Geo/UA allow‑deny with *shadow mode* and Prom metrics.
+* **Unified API layer** — auth, retry, rate‑limit, TTL cache; first client: **OpenAI**.
+* **AI helpers** — Chat / Embed wrappers that pick the right provider at runtime.
+* **Theme & Asset manager** — bundles CSS/JS, serves pre‑compressed brotli.
+* **One‑directory deployment** — drop `/inet` tree onto any jail/server and start.
 
 ---
 
-## Quick Start
+## Quick Start (development)
 
 ```bash
 # Clone and build
-git clone https://github.com/yanizio/adept.git
-cd adept
-go mod tidy
-go build ./cmd/web
+$ git clone https://github.com/yanizio/adept.git
+$ cd adept
+$ go mod tidy
+$ go build ./cmd/web
 
-# Set environment (development)
-cat > .env <<EOF
-GLOBAL_DB_DSN=adept:pass@tcp(127.0.0.1:3306)/adept_global
-TENANT_IDLE_TTL=30m
-TENANT_CACHE_MAX=100
+# Minimal config (.env or conf/global.yaml)
+$ cat > .env <<EOF
+GLOBAL_DB_DSN=adept:pass@tcp(127.0.0.1:3306)/adept_global?parseTime=true&loc=Local
+ADEPT_ROOT=$(pwd)
 EOF
 
 # Run with an example site row already present
-go run ./cmd/web
+$ go run ./cmd/web
 ```
 
-Visit `http://localhost:8080/` for the placeholder page, and `http://localhost:8080/metrics` for live stats.
+Visit [http://127.0.0.1:8080/](http://127.0.0.1:8080/) for the placeholder page and
+[http://127.0.0.1:8080/metrics](http://127.0.0.1:8080/metrics) for live stats.
 
 ---
 
-## Directory Layout
+## Directory Layout (partial)
 
-```
-cmd/                  # entry points (web server, future CLI)
-  web/                # main server binary
+```text
+cmd/
+  web/                    # HTTP entry point
 internal/
-  tenant/             # lazy‑loading cache
-  site/               # SQL helpers for site table
-  database/           # sqlx helpers
-  metrics/            # Prometheus collectors
-config/               # project‑wide constants (default TTLs)
-sites/                # static files per host (synced via rsync)
-sql/                  # schema and migrations
+  api/                    # generic client helpers + service dirs (openai/…)
+  ai/                     # provider‑agnostic Chat/Embed helpers
+  config/                 # env + YAML loader, validation
+  dbcore/                 # sqlx helpers, migrations
+  tenant/                 # meta models + lazy‑load LRU cache
+  security/               # IP/UA/Geo rules, shadow‑mode metrics
+  observability/          # zap, prometheus, OTEL, sentry
+components/               # first‑class business features
+themes/                   # templates + assets
+conf/                     # global.yaml, security.yaml, etc.
+logs/                     # daily JSON logs
 ```
 
 ---
 
-## Environment Variables
+## Configuration & Environment
 
-| Variable           | Description                        | Example                                |
-| ------------------ | ---------------------------------- | -------------------------------------- |
-| `GLOBAL_DB_DSN`    | DSN for the control‑plane database | `user:pass@tcp(10.0.0.5:26257)/global` |
-| `TENANT_IDLE_TTL`  | Idle eviction timeout              | `45m`                                  |
-| `TENANT_CACHE_MAX` | Max cached tenants (LRU)           | `200`                                  |
+Most tunables live in `conf/global.yaml`; environment variables can
+override any key by prefixing with `ADEPT_` and replacing dots with
+double underscores (`__`).
+
+| Variable / YAML key       | Example value                                               | Purpose                           |
+| ------------------------- | ----------------------------------------------------------- | --------------------------------- |
+| `database.global_dsn`     | `user:pass@tcp(127.0.0.1:3306)/adept_global?parseTime=true` | Control‑plane MySQL/Cockroach DSN |
+| `http.listen_addr`        | `127.0.0.1:8080`                                            | Bind address                      |
+| `http.force_https`        | `true`                                                      | 308 redirect for non‑HTTPS        |
+| `adept_root` *(env only)* | `/inet`                                                     | One‑directory deployment root     |
 
 ---
 
-## Building on FreeBSD
+## Building on FreeBSD
 
 ```bash
-sudo pkg install go git
-cd /opt/adept
-make build
+pkg install go git
+cd /usr/local/adept
+make build          # invokes go vet, go test, go build
 service adept_web start
 ```
 
-Environment variables are read first from `/usr/local/etc/adept‑framework/global.env`, falling back to `.env` in the working directory.
+Systemd or rc.d script sets `WorkingDirectory=/inet` and sources
+`/usr/local/etc/adept/global.env` before launch.
 
 ---
 
 ## Contributing
 
-1. Fork the repo, create a feature branch, and run `make vet test`.
-2. Submit a pull request with a clear description.
+1. Fork the repo, create a feature branch.
+2. Run `make vet test`.  Ensure `go vet` and `golangci-lint` pass.
+3. Submit a pull request with a clear description.
 
+We follow the comment style in `guidelines/comment-style.md`
 ---
 
 ## License
