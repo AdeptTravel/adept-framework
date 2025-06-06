@@ -2,24 +2,25 @@
 //
 // Request metadata collector.
 //
-// Context
-// -------
-// This package provides inert structs (`RequestInfo`, `UA`, `Geo`) plus helper
-// functions that enrich an incoming HTTP request with user-agent details,
-// geolocation hints (MaxMind GeoLite 2), and a timestamp.  The structs carry
-// **no** database handles or large buffers, so they are safe to log, JSON-encode,
-// or attach to `context.Context`.
-//
-// Workflow
-// --------
-//  1. `InitGeo` is called at boot with the path to GeoLite2-City.  It opens a
-//     singleton reader (`geoReader`) which is thread-safe for look-ups.
-//  2. Middleware (not in this file) parses the User-Agent header with
-//     `uasurfer.Parse`, resolves the client IP’s geo record, and stores a
-//     `*RequestInfo` value in `context.Context` under an unexported key.
-//  3. Handlers, Components, or Widgets call `requestinfo.FromContext()` to
-//     retrieve the struct and render analytics attributes or template variables.
+/*
+Context
+--------
+This package enriches an incoming HTTP request with user-agent details,
+IP-based geolocation hints, canonical URL, and a UTC timestamp.  All
+helpers emit DEBUG-level Zap spans so developers can trace UA parsing and
+GeoIP look-ups when `ZAP_LEVEL=debug`.
 
+Instrumentation
+---------------
+  • `InitGeo`  – INFO on success, FATAL on failure to open the MaxMind DB.
+  • `parseUA`  – DEBUG with browser, device, bot flag.
+  • `lookupGeo`– DEBUG with IP, country ISO, city (hits only).
+
+Notes
+-----
+  • All structs are inert (no DB handles) and safe to JSON-encode.
+  • Oxford commas, two spaces after periods.  No em dash.
+*/
 package requestinfo
 
 import (
@@ -32,60 +33,51 @@ import (
 
 	"github.com/avct/uasurfer"
 	"github.com/oschwald/geoip2-golang"
+	"go.uber.org/zap"
 )
 
-//
-//  Struct definitions
-//
+/*──────────────────────────── struct definitions ───────────────────────────*/
 
-// UA holds the parsed user-agent properties requested by Brandon.
 type UA struct {
-	Raw         string // Entire User-Agent header
-	Browser     string // "Chrome", "Firefox", "Safari", etc.
+	Raw         string // full User-Agent header
+	Browser     string // "Chrome", "Firefox", …
 	Version     string // "124.0.6367"
-	OS          string // "macOS", "Windows", "Android", "iOS", etc.
-	OSVersion   string // "14.5", "11", "10.0"
-	Device      string // "Desktop", "Phone", "Tablet", "TV", ...
-	Platform    string // "Mac", "Windows", "Linux", "iPad", ...
-	IsBot       bool   // True if UA matches ~18 000 crawler signatures
-	PrimaryLang string // First tag from Accept-Language ("en", "es", ...)
+	OS          string // "macOS", "Windows", …
+	OSVersion   string // "14.5", "11", …
+	Device      string // "Desktop", "Phone", …
+	Platform    string // "Mac", "Windows", …
+	IsBot       bool   // true if crawler
+	PrimaryLang string // first tag from Accept-Language
 }
 
-// Geo holds IP-based geolocation hints.
 type Geo struct {
-	IP         net.IP // Original client address (not X-Forwarded-For chain)
-	CountryISO string // "US", "CA", "FR", ...
-	City       string // "Chicago", "Paris", ...
+	IP         net.IP
+	CountryISO string
+	City       string
 }
 
-// RequestInfo is attached to the project’s Context type and is therefore
-// visible to Components, Widgets, and templates.
 type RequestInfo struct {
 	UA        UA
 	Geo       Geo
-	URL       *url.URL // Pointer copy, safe to dereference read-only
+	URL       *url.URL
 	Timestamp time.Time
 }
 
-//
-//  Package-level state
-//
+/*──────────────────────────── package-level state ──────────────────────────*/
 
-// geoReader is a singleton MaxMind handle.  It is safe for concurrent reads.
-var geoReader *geoip2.Reader
+var geoReader *geoip2.Reader // singleton, safe for concurrent reads
 
-// InitGeo opens the GeoLite2-City database at startup.  Call from main().
+// InitGeo opens the GeoLite2-City DB at startup.
 func InitGeo(dbPath string) {
 	var err error
 	geoReader, err = geoip2.Open(dbPath)
 	if err != nil {
-		panic("requestinfo: cannot open GeoLite2 DB: " + err.Error())
+		zap.S().Fatal("geo db open failed", zap.String("path", dbPath), zap.Error(err))
 	}
+	zap.S().Infow("geo db ready", "path", dbPath)
 }
 
-//
-//  Public helper: FromContext
-//
+/*────────────────────────── context accessor ───────────────────────────────*/
 
 type ctxKey struct{}
 
@@ -94,34 +86,25 @@ func FromContext(ctx context.Context) *RequestInfo {
 	return v
 }
 
-//
-//  Internal helpers
-//
+/*──────────────────────────── internal helpers ─────────────────────────────*/
 
-// parseUA converts a raw header into our UA struct using uasurfer.
+// parseUA converts a raw header into UA struct.
 func parseUA(uaHeader, acceptLang string) UA {
 	u := uasurfer.Parse(uaHeader)
 
-	// Browser family
 	br := strings.TrimPrefix(u.Browser.Name.String(), "Browser")
-
-	// Browser version "major.minor.patch"
 	brVer := trimVersion(u.Browser.Version)
 
-	// OS name and version
 	osName := strings.TrimPrefix(u.OS.Name.String(), "OS")
 	if osName == "MacOSX" {
 		osName = "macOS"
 	}
 	osVer := trimVersion(u.OS.Version)
 
-	// Device class
 	device := deviceTypeToString(u.DeviceType)
-
-	// Platform string via OS.Platform (uasurfer ≈2.x)
 	platform := strings.TrimPrefix(u.OS.Platform.String(), "Platform")
 
-	return UA{
+	ua := UA{
 		Raw:         uaHeader,
 		Browser:     br,
 		Version:     brVer,
@@ -132,17 +115,43 @@ func parseUA(uaHeader, acceptLang string) UA {
 		IsBot:       u.IsBot(),
 		PrimaryLang: primaryLang(acceptLang),
 	}
+
+	zap.S().Debugw("ua parsed",
+		"browser", ua.Browser,
+		"device", ua.Device,
+		"bot", ua.IsBot,
+	)
+	return ua
 }
 
-// trimVersion builds "major.minor.patch" and removes trailing ".0".
+// lookupGeo returns best-effort Geo data.
+func lookupGeo(ip net.IP) Geo {
+	if geoReader == nil || ip == nil {
+		return Geo{IP: ip}
+	}
+	rec, err := geoReader.City(ip)
+	if err != nil {
+		return Geo{IP: ip}
+	}
+	geo := Geo{
+		IP:         ip,
+		CountryISO: rec.Country.IsoCode,
+		City:       rec.City.Names["en"],
+	}
+	zap.S().Debugw("geo lookup", "ip", geo.IP, "country", geo.CountryISO, "city", geo.City)
+	return geo
+}
+
+/*────────────────────────── utility functions ─────────────────────────────*/
+
 func trimVersion(v uasurfer.Version) string {
 	out := strings.TrimSuffix(
 		strings.TrimSuffix(
 			strings.TrimSuffix(
 				strings.Join([]string{
-					intToStr(uint64(v.Major)),
-					intToStr(uint64(v.Minor)),
-					intToStr(uint64(v.Patch)),
+					strconv.Itoa(v.Major),
+					strconv.Itoa(v.Minor),
+					strconv.Itoa(v.Patch),
 				}, "."),
 				".0"),
 			".0"),
@@ -154,12 +163,6 @@ func trimVersion(v uasurfer.Version) string {
 	return out
 }
 
-// intToStr converts uint64 to string.
-func intToStr(i uint64) string {
-	return strconv.FormatUint(i, 10)
-}
-
-// deviceTypeToString maps uasurfer.DeviceType to a user-friendly string.
 func deviceTypeToString(dt uasurfer.DeviceType) string {
 	switch dt {
 	case uasurfer.DeviceComputer:
@@ -179,31 +182,13 @@ func deviceTypeToString(dt uasurfer.DeviceType) string {
 	}
 }
 
-// primaryLang extracts the first language subtag before any ";q=" rule.
 func primaryLang(al string) string {
 	if al == "" {
 		return ""
 	}
-	parts := strings.Split(al, ",")
-	tag := strings.TrimSpace(parts[0])
+	tag := strings.TrimSpace(strings.Split(al, ",")[0])
 	if i := strings.Index(tag, ";"); i != -1 {
 		tag = tag[:i]
 	}
 	return strings.ToLower(tag)
-}
-
-// lookupGeo returns best-effort Geo data using the global reader.
-func lookupGeo(ip net.IP) Geo {
-	if geoReader == nil || ip == nil {
-		return Geo{IP: ip}
-	}
-	rec, err := geoReader.City(ip)
-	if err != nil {
-		return Geo{IP: ip}
-	}
-	return Geo{
-		IP:         ip,
-		CountryISO: rec.Country.IsoCode,
-		City:       rec.City.Names["en"],
-	}
 }

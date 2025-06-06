@@ -1,0 +1,42 @@
+{"level":"info","ts":"2025-06-06T12:33:51.317-0500","msg":"logger online","tee":true}
+{"level":"info","ts":"2025-06-06T12:33:51.317-0500","msg":"connecting to global DB"}
+{"level":"info","ts":"2025-06-06T12:33:51.318-0500","msg":"global DB online"}
+{"level":"info","ts":"2025-06-06T12:33:51.318-0500","msg":"1 active site(s) found"}
+{"level":"info","ts":"2025-06-06T12:33:51.318-0500","msg":"tenant cache online","idle_ttl_min":30,"max_entries":100}
+{"level":"info","ts":"2025-06-06T12:33:51.318-0500","msg":"listening","addr":"127.0.0.1:8080"}
+{"level":"info","ts":"2025-06-06T12:33:57.658-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:33:57.660-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:33:59.539-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:33:59.540-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:37:42.955-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:37:42.958-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:37:42.974-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:37:42.979-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:40:21.359-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:40:21.361-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:40:21.370-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:40:21.371-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:40:23.359-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:40:23.362-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:40:23.376-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:40:23.378-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:40:28.268-0500","msg":"logger online","tee":true}
+{"level":"info","ts":"2025-06-06T12:40:28.268-0500","msg":"connecting to global DB"}
+{"level":"info","ts":"2025-06-06T12:40:28.269-0500","msg":"global DB online"}
+{"level":"info","ts":"2025-06-06T12:40:28.269-0500","msg":"1 active site(s) found"}
+{"level":"info","ts":"2025-06-06T12:40:28.269-0500","msg":"tenant cache online","idle_ttl_min":30,"max_entries":100}
+{"level":"info","ts":"2025-06-06T12:40:28.269-0500","msg":"listening","addr":"127.0.0.1:8080"}
+{"level":"info","ts":"2025-06-06T12:40:30.520-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:40:30.522-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:43:09.452-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:43:09.453-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:43:09.461-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"warn","ts":"2025-06-06T12:43:09.462-0500","msg":"tenant not found","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:43:14.173-0500","msg":"logger online","tee":true}
+{"level":"info","ts":"2025-06-06T12:43:14.173-0500","msg":"connecting to global DB"}
+{"level":"info","ts":"2025-06-06T12:43:14.174-0500","msg":"global DB online"}
+{"level":"info","ts":"2025-06-06T12:43:14.174-0500","msg":"1 active site(s) found"}
+{"level":"info","ts":"2025-06-06T12:43:14.174-0500","msg":"tenant cache online","idle_ttl_min":30,"max_entries":100}
+{"level":"info","ts":"2025-06-06T12:43:14.174-0500","msg":"listening","addr":"127.0.0.1:8080"}
+{"level":"info","ts":"2025-06-06T12:43:16.212-0500","msg":"tenant loading","tenant":"localhost"}
+{"level":"info","ts":"2025-06-06T12:43:16.215-0500","msg":"tenant online","tenant":"localhost","load_ms":3}

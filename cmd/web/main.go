@@ -21,12 +21,12 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 
 	"github.com/yanizio/adept/internal/config"
 	"github.com/yanizio/adept/internal/database"
@@ -39,41 +39,48 @@ import (
 
 // runningInTTY returns true when stdout is a character device.
 func runningInTTY() bool {
-	fi, err := os.Stdout.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	if fi, err := os.Stdout.Stat(); err == nil {
+		return fi.Mode()&os.ModeCharDevice != 0
+	}
+	return false
 }
 
 func main() {
+
+	tempLog, _ := zap.NewDevelopment() // *zap.Logger
+	zap.ReplaceGlobals(tempLog)
+	tempLog.Sugar().Infow("bootstrap", "step", "init")
+
 	//
 	// ── 0.  Load configuration ─────────────────────────────────────────
 	//
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		zap.L().Fatal("load config", zap.Error(err))
 	}
 
 	logOut, err := logger.New(cfg.Paths.Root, runningInTTY())
 	if err != nil {
-		log.Fatalf("start logger: %v", err)
+		zap.L().Fatal("start logger", zap.Error(err))
 	}
 
 	//
 	// ── 1.  Global DB connect ───────────────────────────────────────────
 	//
-	logOut.Println("connecting to global DB …")
+	logOut.Infow("connecting to global DB")
 	globalDB, err := database.Open(cfg.Database.GlobalDSN)
 	if err != nil {
-		logOut.Fatalf("connect global DB: %v", err)
+		logOut.Fatalw("connect global DB", zap.Error(err))
 	}
 	defer globalDB.Close()
-	logOut.Println("global DB online")
+	logOut.Infow("global DB online")
 
 	// Log active-site count as an early sanity check.
 	var active int
 	_ = globalDB.Get(&active, `
 	    SELECT COUNT(*) FROM site
 	    WHERE suspended_at IS NULL AND deleted_at IS NULL`)
-	logOut.Printf("%d active site(s) found", active)
+	logOut.Infof("%d active site(s) found", active)
 
 	//
 	// ── 2.  Tenant cache (lazy site loader) ─────────────────────────────
@@ -125,7 +132,7 @@ func main() {
 			"Head": ctx.Head,
 		}
 		if err := ten.Renderer.ExecuteTemplate(w, "home.html", data); err != nil {
-			logOut.Printf("render error: %v", err)
+			logOut.Errorw("render error", zap.Error(err))
 			http.Error(w, "template error", http.StatusInternalServerError)
 		}
 	})
@@ -139,9 +146,9 @@ func main() {
 	}
 	http.Handle("/", handler)
 
-	logOut.Printf("listening on %s", cfg.HTTP.ListenAddr)
+	logOut.Infow("listening", "addr", cfg.HTTP.ListenAddr)
 	if err := http.ListenAndServe(cfg.HTTP.ListenAddr, nil); err != nil {
-		logOut.Fatalf("http server: %v", err)
+		logOut.Fatalw("http server", zap.Error(err))
 	}
 }
 

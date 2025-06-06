@@ -2,23 +2,37 @@
 //
 // Configuration loader and hot-reloader.
 //
-// Context
-// -------
-// `Load()` builds a Config instance from three layers:
-//
-//  1. Optional `.env` file (jail-wide or repo root).
-//  2. `conf/global.yaml`.
-//  3. Environment variables prefixed `ADEPT_` that override YAML keys.
-//
-// The resulting struct is validated, enriched with the resolved
-// ADEPT_ROOT path, then stored in an `atomic.Pointer` for lock-free
-// reads.  `Reload()` simply calls `Load()` again and swaps the pointer.
-//
-// Notes
-// -----
-// • Vault support will hook into this file later.
-// • The root-discovery logic matches the one-directory deployment model.
-// • Oxford commas, two spaces after periods.
+/*
+Context
+--------
+`Load()` builds one immutable `Config` struct from three layers (highest
+precedence last):
+
+  1. Optional `.env` file — first `<root>/conf/.env`, then jail-wide fallback.
+  2. `conf/global.yaml`.
+  3. Environment variables prefixed `ADEPT_`, where `__` maps to “.”
+     (e.g., `ADEPT_HTTP__LISTEN_ADDR → http.listen_addr`).
+
+After merging, the tree is unmarshalled into strongly-typed structs,
+validated, enriched with the runtime root path, and cached in an
+`atomic.Pointer` for lock-free reads.  `Reload()` simply calls `Load()`
+again and swaps the pointer.
+
+Instrumentation
+---------------
+  • DEBUG spans — root discovery, YAML read, env overlay.
+  • ERROR spans — YAML parse, env overlay, unmarshal, validation failures.
+  • INFO  span  — final “config loaded” with key highlights.
+  • Logs use the global *sugared* logger (`zap.S()`) so early boot issues
+    surface even before the file logger is installed (bootstrap console).
+
+Notes
+-----
+  • `rootDir()` now climbs the cwd tree until it finds `conf/global.yaml`;
+    this lets `go run ./cmd/web` work from any sub-directory.
+  • Vault integration will hook into this file later.
+  • Oxford commas, two spaces after periods.
+*/
 package config
 
 import (
@@ -28,69 +42,93 @@ import (
 	"sync/atomic"
 
 	"github.com/joho/godotenv"
-
-	// koanf core (v2) – give it an explicit alias so “koanf.New” resolves.
 	"github.com/knadh/koanf/parsers/yaml"
-
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	koanf "github.com/knadh/koanf/v2"
+	"go.uber.org/zap"
 )
 
 var current atomic.Pointer[Config]
 
-// rootDir resolves ADEPT_ROOT or derives it from the executable’s parent.
+/*──────────────────────────── root discovery ───────────────────────────────*/
+
+// rootDir resolves ADEPT_ROOT or climbs directories until conf/global.yaml
+// is found.  Falls back to executable heuristic for production layout.
 func rootDir() string {
 	if r := os.Getenv("ADEPT_ROOT"); r != "" {
 		return r
 	}
+
+	wd, _ := os.Getwd()
+	dir := wd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "conf", "global.yaml")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // reached filesystem root
+			break
+		}
+		dir = parent
+	}
+
 	exe, _ := os.Executable()
 	if filepath.Base(filepath.Dir(exe)) == "bin" {
 		return filepath.Dir(filepath.Dir(exe))
 	}
-	wd, _ := os.Getwd()
 	return wd
 }
 
-// Load reads .env, YAML, and env overrides, validates, and caches Config.
+/*─────────────────────────────── loader ───────────────────────────────────*/
+
+// Load reads .env, YAML, env overrides, validates, and caches Config.
 func Load() (*Config, error) {
 	root := rootDir()
+	zap.S().Debugw("config root resolved", "root", root)
 
-	// .env (optional, jail-wide preferred)
+	// .env (optional, no error if missing)
 	_ = godotenv.Load(filepath.Join(root, "conf", ".env"))
 
 	k := koanf.New(".")
-	if err := k.Load(file.Provider(filepath.Join(root, "conf", "global.yaml")), yaml.Parser()); err != nil {
+
+	yamlPath := filepath.Join(root, "conf", "global.yaml")
+	if err := k.Load(file.Provider(yamlPath), yaml.Parser()); err != nil {
+		zap.S().Errorw("config yaml load failed", "file", yamlPath, "err", err)
 		return nil, err
 	}
+	zap.S().Debugw("config yaml loaded", "file", yamlPath)
 
-	// Environment overrides: ADEPT_HTTP__LISTEN_ADDR → http.listen_addr
+	// Env overrides: ADEPT_HTTP__LISTEN_ADDR → http.listen_addr
 	if err := k.Load(env.Provider("ADEPT_", ".", func(s string) string {
 		return strings.ToLower(strings.ReplaceAll(s, "__", "."))
 	}), nil); err != nil {
+		zap.S().Errorw("config env overlay failed", "err", err)
 		return nil, err
 	}
 
 	var cfg Config
 	if err := k.Unmarshal("", &cfg); err != nil {
+		zap.S().Errorw("config unmarshal failed", "err", err)
 		return nil, err
 	}
 
 	cfg.Paths.Root = root
-
 	if err := validateStruct(&cfg); err != nil {
+		zap.S().Errorw("config validation failed", "err", err)
 		return nil, err
 	}
 
 	current.Store(&cfg)
+	zap.S().Infow("config loaded",
+		"listen_addr", cfg.HTTP.ListenAddr,
+		"force_https", cfg.HTTP.ForceHTTPS,
+		"root", cfg.Paths.Root,
+	)
 	return &cfg, nil
 }
 
-// Get returns the last successfully loaded Config pointer.
-func Get() *Config { return current.Load() }
+/*──────────────────────────── helpers ─────────────────────────────────────*/
 
-// Reload re-reads config files and swaps the atomic pointer.
-func Reload() error {
-	_, err := Load()
-	return err
-}
+func Get() *Config  { return current.Load() }
+func Reload() error { _, err := Load(); return err }

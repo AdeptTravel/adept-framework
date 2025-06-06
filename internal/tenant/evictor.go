@@ -19,8 +19,7 @@
 // -----
 //   - All map operations use `sync.Map` APIs; no additional locks needed.
 //   - `metrics.TenantEvictTotal` and `metrics.ActiveTenants` gauge are
-//     updated in-line.  This file imports only `time` and `sort` plus the
-//     metrics package.
+//     updated in-line.
 //   - Oxford commas, two spaces after periods, no m-dash.
 package tenant
 
@@ -47,7 +46,10 @@ func (c *Cache) evictLoop() {
 			if idle > c.idleTTL {
 				_ = ent.tenant.Close()
 				c.m.Delete(key)
-				c.log.Printf("tenant %s evicted after %v idle", key, idle.Truncate(time.Second))
+				c.log.Infow("tenant evicted (idle)",
+					"tenant", key,
+					"idle_sec", idle.Seconds(),
+				)
 				metrics.TenantEvictTotal.Inc()
 				metrics.ActiveTenants.Dec()
 			}
@@ -74,7 +76,9 @@ func (c *Cache) evictLoop() {
 				if v, ok := c.m.Load(all[i].key); ok {
 					_ = v.(*entry).tenant.Close()
 					c.m.Delete(all[i].key)
-					c.log.Printf("tenant %s evicted (LRU pressure)", all[i].key)
+					c.log.Infow("tenant evicted (LRU)",
+						"tenant", all[i].key,
+					)
 					metrics.TenantEvictTotal.Inc()
 					metrics.ActiveTenants.Dec()
 				}

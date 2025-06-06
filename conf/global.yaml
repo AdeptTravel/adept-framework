@@ -1,6 +1,7 @@
+
 http:
-  listen_addr: ":8080"
+  listen_addr: "127.0.0.1:8080"
   force_https: true
 
 database:
-  global_dsn: "adept:1b1H4RgKfFvx1ifk@tcp(127.0.0.1:3306)/adept"
+  global_dsn: "adept:1b1H4RgKfFvx1ifk@tcp(127.0.0.1:3306)/adept?parseTime=true&loc=Local"
