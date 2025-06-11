@@ -1,7 +1,10 @@
+Here is the full, updated `ARCHITECTURE.md` with all Vault-related changes integrated and comment style preserved:
+
+````markdown
 # Adept · System Architecture (MVP)
 
-> **Status:** Revised 2025-06-06 — adds unified **API** and **AI** layers,
-> prunes completed work, and updates boot / request pipelines.
+> **Status:** Revised 2025-06-11 — adds Vault integration, updates boot
+> sequence, and marks global DB secret handling as complete.
 
 ---
 
@@ -31,7 +34,8 @@ adept/
 │   ├── ai/                       # Chat / Embed helpers, provider router
 │   │   ├── llm.go
 │   │   └── provider/openai/ …
-│   ├── config/                   # env, YAML, Vault (future)
+│   ├── config/                   # env, YAML, Vault integration
+│   ├── vault/                    # singleton client + KV helpers
 │   ├── dbcore/                   # sqlx helpers, migrations
 │   ├── tenant/                   # meta models + lazy-load LRU cache
 │   ├── security/                 # IP / UA / Geo rules, shadow-mode
@@ -53,8 +57,8 @@ adept/
 | -- | ------------------------------------------------ | --------------- | ------ |
 | 1  | Resolve **ADEPT\_ROOT**                          | `config`        | yes    |
 | 2  | Logger core (Zap) + Prometheus `/metrics`        | `observability` | yes    |
-| 3  | Load `.env`, YAML, env overrides                 | `config`        | yes    |
-| 4  | DB connect, migrations                           | `dbcore`        | yes    |
+| 3  | Load `.env`, YAML, Vault secrets, env overrides  | `config`        | yes    |
+| 4  | DB connect via lazy DSN provider (Vault‑aware)   | `database`      | yes    |
 | 5  | Load global + tenant API credentials             | `api`           | yes    |
 | 6  | Security engine ruleset                          | `security`      | yes    |
 | 7  | Tenant registry & cold-load cache                | `tenant/cache`  | no     |
@@ -82,7 +86,7 @@ Tenant.Router
     │     └─ optional Widget(s)
     └─ API layer  →  external service
            └─ AI layer (Chat / Embed / Classify)
-
+````
 
 ---
 
@@ -94,14 +98,14 @@ Tenant.Router
 * Config file `conf/security.yaml`.
 * Metrics: `adept_security_hits_total`, `adept_blocklist_hits_total`.
 
-### 4.2 API Layer **(new)**
+### 4.2 API Layer
 
 * Package `internal/api`.
 * Shared helpers: `client.go`, `retry.go`, `rate.go`, `cache.go`.
 * Per‑service directories (first: **openai**).
 * Per‑tenant credentials injected by the Tenant loader.
 
-### 4.3 AI Layer **(new)**
+### 4.3 AI Layer
 
 * Package `internal/ai`.
 * Interfaces `LLM`, `Vision`, etc.
@@ -129,6 +133,13 @@ Tenant.Router
 * **Tracing:** OTLP exporter (Tempo / Jaeger), 1 % sample rate.
 * **Metrics:** Prometheus, ClickHouse batch via JetStream.
 
+### 4.8 Vault Secrets
+
+* Vault client in `internal/vault` (singleton, renewal-aware).
+* Config loader resolves `vault:<path>#<key>` for any field.
+* Global DB credentials are pulled securely from Vault at boot.
+* Supports future dynamic credentials and per-tenant paths.
+
 ---
 
 ## 5 · Deployment Model
@@ -142,11 +153,11 @@ Tenant.Router
 
 ## 6 · Outstanding TODOs
 
+* ✅ Global DB credential pulled from Vault via AppRole.
+* ⏳ Tenant credential loader (Vault path or AES‑enc fallback).
 * API core helpers + OpenAI client (**Q3‑2025**).
 * AI layer Chat / Embed with provider router (**Q3‑2025**).
-* Tenant credential loader (Vault or AES‑enc table).
 * Per‑tenant rate‑limit middleware.
 * Forms subsystem, Image variant generator, CLI utilities.
 * Observability polish: ClickHouse consumer, Tempo dashboards.
-
 
