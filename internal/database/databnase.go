@@ -1,7 +1,12 @@
-// Package database centralises sqlx connection helpers.  The wrapper
-// intentionally stays thin, but it now offers context‑aware dialing, retry
-// logic, and configurable pool sizes so callers can tailor resource usage
-// without rewriting boilerplate.
+// internal/database/database.go
+//
+// Package database centralises sqlx connection helpers.  The wrapper stays
+// thin, but it offers context-aware dialing, retry logic, configurable pool
+// sizes, **and now a lazy DSN provider** so secrets fetched from Vault (or any
+// other rotating source) can be injected at call-time.  Existing helpers that
+// accept a raw DSN are preserved as shims so downstream code keeps compiling.
+//
+// Oxford commas, two spaces after periods.
 
 package database
 
@@ -10,15 +15,16 @@ import (
 	"errors"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // side‑effect import keeps driver pluggable
+	_ "github.com/go-sql-driver/mysql" // side-effect import keeps driver pluggable
 	"github.com/jmoiron/sqlx"
 )
 
 //
-// Options lets callers tune connection‑pool behaviour and retry policy.
-// Zero values fall back to sensible defaults.
+// configurable options
 //
 
+// Options lets callers tune connection-pool behaviour and retry policy.  Zero
+// values fall back to sensible defaults.
 type Options struct {
 	MaxOpenConns    int           // default 15
 	MaxIdleConns    int           // default 5
@@ -35,7 +41,6 @@ var defaultOpts = Options{
 	RetryBackoff:    time.Second,
 }
 
-// merge fills zero values in dst with defaults.
 func (dst *Options) merge() {
 	if dst.MaxOpenConns == 0 {
 		dst.MaxOpenConns = defaultOpts.MaxOpenConns
@@ -51,37 +56,55 @@ func (dst *Options) merge() {
 	}
 }
 
-// Open is a convenience wrapper that dials with background context and
-// default pool sizes.
+//
+// DSN provider glue
+//
+
+// DSNProvider returns a valid DSN string every time it is called.  The function
+// may hit Vault, perform in-memory rotation, or simply return a constant.
+type DSNProvider func() string
+
+//
+// public helpers
+//
+
 func Open(dsn string) (*sqlx.DB, error) {
-	return OpenWithOptions(context.Background(), dsn, Options{})
+	return OpenProvider(context.Background(), func() string { return dsn }, Options{})
 }
 
-// OpenWithPool lets callers override maxOpen and maxIdle while keeping all
-// other defaults intact.
+func OpenProvider(ctx context.Context, dsnFunc DSNProvider, opts Options) (*sqlx.DB, error) {
+	return openWithOptions(ctx, dsnFunc, opts)
+}
+
 func OpenWithPool(dsn string, maxOpen, maxIdle int) (*sqlx.DB, error) {
-	return OpenWithOptions(context.Background(), dsn, Options{
-		MaxOpenConns: maxOpen,
-		MaxIdleConns: maxIdle,
-	})
+	return OpenProvider(
+		context.Background(),
+		func() string { return dsn },
+		Options{MaxOpenConns: maxOpen, MaxIdleConns: maxIdle},
+	)
 }
 
-// OpenWithOptions dials using the provided context and options.  If Retries
-// > 0, it will re‑attempt the dial + ping loop with exponential backoff.
+// Deprecated: migrate to OpenProvider for rotational credentials.
 func OpenWithOptions(ctx context.Context, dsn string, opts Options) (*sqlx.DB, error) {
+	return openWithOptions(ctx, func() string { return dsn }, opts)
+}
+
+//
+// internal dial + retry loop
+//
+
+func openWithOptions(ctx context.Context, dsnFunc DSNProvider, opts Options) (*sqlx.DB, error) {
 	opts.merge()
 
 	var lastErr error
 	backoff := opts.RetryBackoff
 
 	for attempt := 0; attempt <= opts.Retries; attempt++ {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return nil, ctx.Err()
-		default:
 		}
 
-		db, err := sqlx.Open("mysql", dsn)
+		db, err := sqlx.Open("mysql", dsnFunc())
 		if err != nil {
 			lastErr = err
 			goto retry
@@ -92,10 +115,9 @@ func OpenWithOptions(ctx context.Context, dsn string, opts Options) (*sqlx.DB, e
 		db.SetConnMaxLifetime(opts.ConnMaxLifetime)
 
 		if err = db.PingContext(ctx); err == nil {
-			return db, nil // success
+			return db, nil
 		}
 
-		// ping failed, record error and retry after close
 		_ = db.Close()
 		lastErr = err
 
@@ -103,7 +125,7 @@ func OpenWithOptions(ctx context.Context, dsn string, opts Options) (*sqlx.DB, e
 		if attempt < opts.Retries {
 			select {
 			case <-time.After(backoff):
-				backoff *= 2 // simple exponential
+				backoff *= 2
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
