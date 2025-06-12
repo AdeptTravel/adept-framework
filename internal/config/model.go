@@ -43,13 +43,17 @@ type HTTP struct {
 
 // Database holds DSN templates and secrets.
 //
-// The *template* (`GlobalDSN`) is kept in YAML so operators can tweak
-// host, port, or flags without touching Vault.  The *secret* portion
-// (`GlobalPassword`) is stored in Vault and injected at runtime, keeping
-// credentials out of flat files and git history.
+//   - *Global* DSN template (`GlobalDSN`) stays in YAML so operators can
+//     tweak host, port, or flags without touching Vault.
+//   - *Global* password (`GlobalPassword`) is stored in Vault and injected
+//     at runtime, keeping credentials out of flat files and git history.
+//   - *LocalhostAlias* lets dev instances map the host string "localhost"
+//     to a unique schema/user key (default "devlocal") so they do not
+//     collide with production names.
 type Database struct {
 	GlobalDSN      string `koanf:"global_dsn"      validate:"required"`
 	GlobalPassword string `koanf:"global_password" validate:"required"`
+	LocalhostAlias string `koanf:"localhost_alias" validate:"omitempty"`
 }
 
 //

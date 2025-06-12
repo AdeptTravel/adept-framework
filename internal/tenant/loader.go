@@ -1,29 +1,33 @@
 // internal/tenant/loader.go
 //
-// host → Tenant loader.
+// host → Tenant loader (Vault-aware).
 //
 // Context
 // -------
-// The cache’s slow-path calls `loadSite` to turn a Host header into a live
-// Tenant instance.  The loader performs exactly four blocking steps:
+// The cache’s slow-path calls `loadSite` to transform an incoming Host header
+// into a live *Tenant.  The function performs five blocking steps:
 //
-//  1. Fetch the `site` row (`meta.ByHost`).
-//  2. Fetch the key-value pairs from `site_config`.
-//  3. Open a small per-site DB pool with retry and sane limits.
-//  4. Parse the active Theme’s templates.
+//   1. Resolve the lookup host (alias “localhost” if needed) and fetch the
+//      `site` row (`meta.ByHost`).
+//   2. Fetch key-value pairs from `site_config`.
+//   3. Resolve the tenant DB password from Vault and build the DSN.
+//   4. Open a small per-site DB pool with retry and sane limits.
+//   5. Parse the active Theme’s templates.
 //
-// All heavy resources (DB pool, parsed templates) are created once here
-// and reused for every request until the tenant is evicted.
+// Heavy resources (DB pool, parsed templates) are created once per cache
+// entry and reused until eviction.
 //
 // Notes
 // -----
-//   - On any error the function returns early; the cache logs and surfaces
-//     the error to the caller.
-//   - Oxford commas, two spaces after periods, no m-dash.
+// • Host sanitising and DSN construction live in helpers.go
+//   (`resolveLookupHost`, `sanitizeHost`, `buildTenantDSN`).
+// • Oxford commas, two spaces after periods.
+
 package tenant
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -31,17 +35,24 @@ import (
 	"github.com/yanizio/adept/internal/database"
 	"github.com/yanizio/adept/internal/tenant/meta"
 	"github.com/yanizio/adept/internal/theme"
+	"github.com/yanizio/adept/internal/vault"
 )
 
-// loadSite turns host → *Tenant in four steps:
 //
-//  1. Fetch site row.
-//  2. Fetch key-value config rows.
-//  3. Open small DB pool.
-//  4. Parse theme templates.
-func loadSite(ctx context.Context, global *sqlx.DB, host string) (*Tenant, error) {
-	// 1. site row
-	rec, err := meta.ByHost(ctx, global, host)
+// loader
+//
+
+// loadSite executes the slow-path load in five well-defined steps.
+func loadSite(
+	ctx context.Context,
+	global *sqlx.DB,
+	host string,
+	vcli *vault.Client,
+) (*Tenant, error) {
+
+	// 1. resolve alias and fetch site row
+	lookupHost := resolveLookupHost(host)
+	rec, err := meta.ByHost(ctx, global, lookupHost)
 	if err != nil {
 		return nil, ErrNotFound
 	}
@@ -52,7 +63,20 @@ func loadSite(ctx context.Context, global *sqlx.DB, host string) (*Tenant, error
 		return nil, err
 	}
 
-	// 3. tenant DB pool
+	// 3. resolve password and build DSN
+	key := sanitizeHost(host) // alias already handled inside
+	pw, err := vcli.GetKV(
+		ctx,
+		fmt.Sprintf("secret/adept/tenant/%s/db", key),
+		"password",
+		10*time.Minute,
+	)
+	if err != nil {
+		return nil, err
+	}
+	dsn := buildTenantDSN(key, pw)
+
+	// 4. tenant DB pool (small, single-tenant)
 	opts := database.Options{
 		MaxOpenConns:    5,
 		MaxIdleConns:    2,
@@ -60,12 +84,12 @@ func loadSite(ctx context.Context, global *sqlx.DB, host string) (*Tenant, error
 		Retries:         2,
 		RetryBackoff:    500 * time.Millisecond,
 	}
-	db, err := database.OpenWithOptions(ctx, rec.DSN, opts)
+	db, err := database.OpenProvider(ctx, func() string { return dsn }, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. theme parsing
+	// 5. theme parsing
 	enabledComponents := []string{"core"} // TODO: pull from ACL table
 	mgr := theme.Manager{BaseDir: "themes"}
 	th, err := mgr.Load(rec.Theme, enabledComponents)

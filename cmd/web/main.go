@@ -25,7 +25,7 @@ package main
 
 import (
 	"context"
-	"fmt" // formats DSN template with secret
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -39,6 +39,7 @@ import (
 	"github.com/yanizio/adept/internal/middleware"
 	"github.com/yanizio/adept/internal/module"
 	"github.com/yanizio/adept/internal/tenant"
+	"github.com/yanizio/adept/internal/vault"
 	"github.com/yanizio/adept/internal/viewhelpers"
 )
 
@@ -46,9 +47,7 @@ import (
 // utility – runningInTTY
 //
 
-// runningInTTY returns true when stdout is a character device.  We use this
-// only to decide whether the logger should tee JSON logs to console during
-// local development.  In systemd or Docker the answer is usually “false.”
+// runningInTTY returns true when stdout is a character device.
 func runningInTTY() bool {
 	if fi, err := os.Stdout.Stat(); err == nil {
 		return fi.Mode()&os.ModeCharDevice != 0
@@ -71,7 +70,7 @@ func main() {
 	}
 
 	//
-	// Bootstrap production logger as soon as we know log-directory path.
+	// Bootstrap production logger as soon as we know log directory.
 	//
 	logOut, err := logger.New(cfg.Paths.Root, runningInTTY())
 	if err != nil {
@@ -79,13 +78,18 @@ func main() {
 	}
 
 	//
+	// Bootstrap shared Vault client (AppRole token already set by run.sh).
+	//
+	vaultCli, err := vault.New(context.Background(), logOut.Debugf)
+	if err != nil {
+		logOut.Fatalw("vault init", zap.Error(err))
+	}
+
+	//
 	// 1.  Global DB connect
 	//
 	logOut.Infow("connecting to global DB")
 
-	// DSN provider – formats the template with the secret password fetched
-	// from Vault.  Using config.Get() instead of the earlier cfg var means
-	// hot-reloads will pick up any future change automatically.
 	dsnFunc := func() string {
 		c := config.Get()
 		return fmt.Sprintf(c.Database.GlobalDSN, c.Database.GlobalPassword)
@@ -106,9 +110,9 @@ func main() {
 	logOut.Infof("%d active site(s) found", active)
 
 	//
-	// 2.  Tenant cache (lazy site loader)
+	// 2.  Tenant cache (lazy site loader, Vault-aware)
 	//
-	cache := tenant.New(globalDB, tenant.IdleTTL, tenant.MaxEntries, logOut)
+	cache := tenant.New(globalDB, tenant.IdleTTL, tenant.MaxEntries, logOut, vaultCli)
 
 	//
 	// 3.  Metrics endpoint
@@ -169,8 +173,8 @@ func main() {
 // stripPort helper
 //
 
-// stripPort removes any “:port” suffix from the Host header so that "example.com:443"
-// and "example.com" hit the same tenant cache entry.
+// stripPort removes any \":port\" suffix so \"example.com:443\" and
+// \"example.com\" hit the same tenant cache entry.
 func stripPort(h string) string {
 	if i := strings.IndexByte(h, ':'); i != -1 {
 		return h[:i]

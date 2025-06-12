@@ -11,7 +11,6 @@ DROP TABLE IF EXISTS `site`;
 CREATE TABLE `site` (
   `id`            INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   `host`          VARCHAR(256)  NOT NULL UNIQUE,
-  `dsn`           VARCHAR(512)  NOT NULL,
   `theme`         VARCHAR(128)  NOT NULL DEFAULT 'base',
   `locale`        VARCHAR(16)   NOT NULL DEFAULT 'en_US',
   `routing_mode`  VARCHAR(6)    NOT NULL DEFAULT 'path',
