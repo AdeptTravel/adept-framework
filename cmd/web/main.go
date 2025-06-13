@@ -1,26 +1,7 @@
 // cmd/web/main.go
 //
-// Adept – HTTP entry point.
-//
-// Request life-cycle
-// ------------------
-//
-//  0. Load configuration (dotenv → YAML → env → Vault) via internal/config.
-//  1. Start daily rotating logger (tees to console when running in a TTY).
-//  2. Open the global control-plane DB and log active-site count.
-//  3. Build tenant cache (lazy-loads each site on first hit).
-//  4. Expose Prometheus /metrics endpoint.
-//  5. Build the root handler and wrap it with ForceHTTPS middleware
-//     when cfg.HTTP.ForceHTTPS is true.
-//  6. Root-handler flow:
-//     • tenant lookup            – cache.Get(host)
-//     • per-request Context      – Head builder, URLInfo, UA helpers
-//     • default <title>          – host name
-//     • component dispatch       – module.Lookup(path)
-//     • fallback template render – home.html
-//
-// Oxford commas, two spaces after periods.
-
+// Adept – HTTP entry point (Component + View system).
+// Component routers are mounted automatically per tenant.
 package main
 
 import (
@@ -29,23 +10,21 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+
+	// Side-effect imports: each component registers itself via init().
+	_ "github.com/yanizio/adept/components/example"
 
 	"github.com/yanizio/adept/internal/config"
 	"github.com/yanizio/adept/internal/database"
 	"github.com/yanizio/adept/internal/logger"
 	"github.com/yanizio/adept/internal/middleware"
-	"github.com/yanizio/adept/internal/module"
 	"github.com/yanizio/adept/internal/tenant"
 	"github.com/yanizio/adept/internal/vault"
-	"github.com/yanizio/adept/internal/viewhelpers"
 )
-
-//
-// utility – runningInTTY
-//
 
 // runningInTTY returns true when stdout is a character device.
 func runningInTTY() bool {
@@ -56,107 +35,57 @@ func runningInTTY() bool {
 }
 
 func main() {
-	// Temporary dev logger so early-boot errors surface.  Replaced later.
-	tempLog, _ := zap.NewDevelopment()
-	zap.ReplaceGlobals(tempLog)
-	tempLog.Sugar().Infow("bootstrap", "step", "init")
+	// 0. Early dev logger so boot errors surface.
+	devLog, _ := zap.NewDevelopment()
+	zap.ReplaceGlobals(devLog)
 
-	//
-	// 0.  Load configuration (dotenv → YAML → env → Vault)
-	//
+	// 1. Load configuration.
 	cfg, err := config.Load()
 	if err != nil {
 		zap.L().Fatal("load config", zap.Error(err))
 	}
 
-	//
-	// Bootstrap production logger as soon as we know log directory.
-	//
+	// 2. Production logger.
 	logOut, err := logger.New(cfg.Paths.Root, runningInTTY())
 	if err != nil {
 		zap.L().Fatal("start logger", zap.Error(err))
 	}
 
-	//
-	// Bootstrap shared Vault client (AppRole token already set by run.sh).
-	//
+	// 3. Vault client (AppRole token already set).
 	vaultCli, err := vault.New(context.Background(), logOut.Debugf)
 	if err != nil {
 		logOut.Fatalw("vault init", zap.Error(err))
 	}
 
-	//
-	// 1.  Global DB connect
-	//
-	logOut.Infow("connecting to global DB")
-
+	// 4. Global DB connection.
 	dsnFunc := func() string {
 		c := config.Get()
 		return fmt.Sprintf(c.Database.GlobalDSN, c.Database.GlobalPassword)
 	}
-
 	globalDB, err := database.OpenProvider(context.Background(), dsnFunc, database.Options{})
 	if err != nil {
 		logOut.Fatalw("connect global DB", zap.Error(err))
 	}
 	defer globalDB.Close()
-	logOut.Infow("global DB online")
 
-	// Early sanity check – log how many active sites exist.
-	var active int
-	_ = globalDB.Get(&active, `
-	    SELECT COUNT(*) FROM site
-	    WHERE suspended_at IS NULL AND deleted_at IS NULL`)
-	logOut.Infof("%d active site(s) found", active)
+	// 5. Tenant cache.
+	cache := tenant.New(globalDB, 30*time.Minute, 100, logOut, vaultCli)
 
-	//
-	// 2.  Tenant cache (lazy site loader, Vault-aware)
-	//
-	cache := tenant.New(globalDB, tenant.IdleTTL, tenant.MaxEntries, logOut, vaultCli)
-
-	//
-	// 3.  Metrics endpoint
-	//
+	// 6. Prometheus metrics endpoint.
 	http.Handle("/metrics", promhttp.Handler())
 
-	//
-	// 4.  Root handler — tenant lookup → component dispatch → theme render
-	//
+	// 7. Root handler: Host → tenant router.
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
-
 		ten, err := cache.Get(host)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-
-		// Register User-Agent helpers (idempotent per renderer).
-		ten.Renderer.Funcs(viewhelpers.FuncMap())
-
-		// Build per-request Context and seed head defaults.
-		ctx := tenant.NewContext(r)
-		ctx.Head.SetTitle(host) // default title
-		ctx.Head.Meta(`<meta charset="utf-8">`)
-		ctx.Head.Link(`<link rel="icon" href="/favicon.ico">`)
-
-		// Component dispatch — exact path match, else fall through.
-		if h := module.Lookup(r.URL.Path); h != nil {
-			h(ten, ctx, w, r)
-			return
-		}
-
-		// Fallback render of home.html.
-		data := map[string]any{"Ctx": ctx, "Head": ctx.Head}
-		if err := ten.Renderer.ExecuteTemplate(w, "home.html", data); err != nil {
-			logOut.Errorw("render error", zap.Error(err))
-			http.Error(w, "template error", http.StatusInternalServerError)
-		}
+		ten.Router().ServeHTTP(w, r) // mounts all Components
 	})
 
-	//
-	// 5.  Optional HTTPS-enforcement middleware
-	//
+	// 8. Optional HTTPS enforcement.
 	var handler http.Handler = root
 	if cfg.HTTP.ForceHTTPS {
 		handler = middleware.ForceHTTPS(cache, root)
@@ -169,12 +98,8 @@ func main() {
 	}
 }
 
-//
-// stripPort helper
-//
-
-// stripPort removes any \":port\" suffix so \"example.com:443\" and
-// \"example.com\" hit the same tenant cache entry.
+// stripPort removes the ":port" suffix so "example.com:443" and
+// "example.com" map to the same tenant cache entry.
 func stripPort(h string) string {
 	if i := strings.IndexByte(h, ':'); i != -1 {
 		return h[:i]

@@ -2,26 +2,8 @@
 //
 // host → Tenant loader (Vault-aware).
 //
-// Context
-// -------
-// The cache’s slow-path calls `loadSite` to transform an incoming Host header
-// into a live *Tenant.  The function performs five blocking steps:
-//
-//   1. Resolve the lookup host (alias “localhost” if needed) and fetch the
-//      `site` row (`meta.ByHost`).
-//   2. Fetch key-value pairs from `site_config`.
-//   3. Resolve the tenant DB password from Vault and build the DSN.
-//   4. Open a small per-site DB pool with retry and sane limits.
-//   5. Parse the active Theme’s templates.
-//
-// Heavy resources (DB pool, parsed templates) are created once per cache
-// entry and reused until eviction.
-//
-// Notes
-// -----
-// • Host sanitising and DSN construction live in helpers.go
-//   (`resolveLookupHost`, `sanitizeHost`, `buildTenantDSN`).
-// • Oxford commas, two spaces after periods.
+// Performs five blocking steps per cold-load and finally runs per-tenant
+// Component initialisers.
 
 package tenant
 
@@ -32,6 +14,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/yanizio/adept/internal/component"
 	"github.com/yanizio/adept/internal/database"
 	"github.com/yanizio/adept/internal/tenant/meta"
 	"github.com/yanizio/adept/internal/theme"
@@ -42,7 +25,8 @@ import (
 // loader
 //
 
-// loadSite executes the slow-path load in five well-defined steps.
+// loadSite executes the slow-path load in five well-defined steps, then
+// invokes Init hooks for every registered Component.
 func loadSite(
 	ctx context.Context,
 	global *sqlx.DB,
@@ -64,7 +48,7 @@ func loadSite(
 	}
 
 	// 3. resolve password and build DSN
-	key := sanitizeHost(host) // alias already handled inside
+	key := sanitizeHost(host)
 	pw, err := vcli.GetKV(
 		ctx,
 		fmt.Sprintf("secret/adept/tenant/%s/db", key),
@@ -76,7 +60,7 @@ func loadSite(
 	}
 	dsn := buildTenantDSN(key, pw)
 
-	// 4. tenant DB pool (small, single-tenant)
+	// 4. tenant DB pool
 	opts := database.Options{
 		MaxOpenConns:    5,
 		MaxIdleConns:    2,
@@ -97,11 +81,24 @@ func loadSite(
 		return nil, err
 	}
 
-	return &Tenant{
+	// Assemble Tenant
+	ten := &Tenant{
 		Meta:     *rec,
 		Config:   cfg,
 		DB:       db,
 		Theme:    th,
 		Renderer: th.Renderer,
-	}, nil
+		Vault:    vcli, // expose Vault to Components
+	}
+
+	// Run per-tenant Init hooks (if implemented).
+	for _, c := range component.All() {
+		if initc, ok := c.(component.Initializer); ok {
+			if err := initc.Init(ten); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return ten, nil
 }

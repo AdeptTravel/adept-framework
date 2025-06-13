@@ -47,3 +47,4 @@ sql/default.sql
 init.sh
 run.sh
 .env.vault
+TODO.txt

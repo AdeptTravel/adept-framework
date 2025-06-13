@@ -1,0 +1,8 @@
+{{ define "example" }}
+<h1>Request details</h1>
+<ul>
+  <li>IP: {{ .Info.Geo.IP }}</li>
+  <li>Country: {{ .Info.Geo.CountryISO }}</li>
+  <li>Browser: {{ .Info.UA.Browser }} ({{ .Info.UA.Device }})</li>
+</ul>
+{{ end }}
