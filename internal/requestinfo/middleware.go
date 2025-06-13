@@ -1,36 +1,33 @@
 // internal/requestinfo/middleware.go
 //
-// HTTP middleware that enriches each request with *RequestInfo.
+// HTTP middleware that enriches each request with *RequestInfo*.
 //
-/*
-Context
---------
-This handler sits high in the chain—immediately after logging / metrics
-but before tenant lookup and security filters.  For every request it:
-
-  1. Parses the User-Agent header and Accept-Language list.
-  2. Extracts the left-most public client IP from X-Forwarded-For or
-     X-Real-IP, falling back to `r.RemoteAddr`.
-  3. Performs a GeoLite2 lookup.
-  4. Stores a `*RequestInfo` value in `request.Context` under an
-     unexported key, so Components, Widgets, and templates can access
-     UA, Geo, URL, and timestamp attributes without reparsing.
-
-Instrumentation
----------------
-When `ZAP_LEVEL=debug`, each invocation logs a DEBUG span containing:
-
-  • client IP, country ISO, city
-  • browser family, device class, bot flag
-  • request path and raw query string
-
-Notes
------
-  • All look-ups are read-only and pool-based, so the middleware is safe
-    under heavy concurrency.
-  • UA parse ≈ 75 ns, Geo lookup ≈ 50 µs (cached).
-  • Oxford commas, two spaces after periods.  No em dash.
-*/
+// Context
+// --------
+// This handler sits high in the chain—immediately after logging / metrics
+// but before tenant lookup and security filters.  For every request it:
+//
+//  1. Parses the User‑Agent header.
+//  2. Extracts the left‑most public client IP from X‑Forwarded‑For or
+//     X‑Real‑IP, falling back to `r.RemoteAddr`.
+//  3. Performs a GeoLite2 lookup.
+//  4. Stores a `*RequestInfo` value in `request.Context` under an
+//     unexported key, so Components, Widgets, and templates can access
+//     UA, Geo, URL, and timestamp attributes without reparsing.
+//
+// Instrumentation
+// ---------------
+// When `ZAP_LEVEL=debug`, each invocation logs a DEBUG span containing:
+//
+//   - client IP, country ISO, city
+//   - browser family, device class, bot flag
+//   - request path and raw query string
+//
+// Notes
+// -----
+//   - All look‑ups are read‑only and pool‑based, so the middleware is safe
+//     under heavy concurrency.
+//   - UA parse ≈ 40 ns (uasurfer), Geo lookup ≈ 50 µs (cached).
 package requestinfo
 
 import (
@@ -40,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yanizio/adept/internal/ua"
 	"go.uber.org/zap"
 )
 
@@ -51,9 +49,9 @@ func Enrich(next http.Handler) http.Handler {
 		ip := clientIP(r)
 
 		info := &RequestInfo{
-			UA:        parseUA(r.UserAgent(), r.Header.Get("Accept-Language")),
+			UA:        ua.Parse(r.UserAgent()),
 			Geo:       lookupGeo(ip),
-			URL:       r.URL, // pointer copy; safe for read-only access
+			URL:       r.URL, // pointer copy; safe for read‑only access
 			Timestamp: time.Now().UTC(),
 		}
 
@@ -75,8 +73,8 @@ func Enrich(next http.Handler) http.Handler {
 
 /*──────────────────────────── client IP helper ─────────────────────────────*/
 
-// clientIP extracts the left-most public address from X-Forwarded-For or
-// X-Real-IP, falling back to r.RemoteAddr ("ip:port").
+// clientIP extracts the left‑most public address from X‑Forwarded‑For or
+// X‑Real‑IP, falling back to r.RemoteAddr ("ip:port").
 func clientIP(r *http.Request) net.IP {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		for _, part := range strings.Split(xff, ",") {
