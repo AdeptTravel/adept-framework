@@ -31,9 +31,9 @@ import (
 	"github.com/yanizio/adept/internal/ua"
 )
 
-// -----------------------------------------------------------------------------
+//
 // Per-request helper bundle
-// -----------------------------------------------------------------------------
+//
 
 // Context bundles request-scoped helpers for Components and Widgets.
 type Context struct {
@@ -54,9 +54,9 @@ func NewContext(r *http.Request) *Context {
 	}
 }
 
-// -----------------------------------------------------------------------------
+//
 // Tenant pointer helpers (cycles ↔ safe)
-// -----------------------------------------------------------------------------
+//
 
 // ctxTenantKey is unexported to avoid collisions.
 type ctxTenantKey struct{}

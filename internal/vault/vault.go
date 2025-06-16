@@ -29,9 +29,9 @@ import (
 	vault "github.com/hashicorp/vault/api"
 )
 
-// -----------------------------------------------------------------------------
+//
 // SECTION 1.  Public façade
-// -----------------------------------------------------------------------------
+//
 
 // Client is safe for concurrent use.  Create once at startup and inject it via
 // your DI container.  Zero value is invalid.
@@ -128,9 +128,9 @@ func (c *Client) GetKV(ctx context.Context, secretPath, key string, ttl time.Dur
 	return sval, nil
 }
 
-// -----------------------------------------------------------------------------
+//
 // SECTION 2.  Background token renewal
-// -----------------------------------------------------------------------------
+//
 
 func (c *Client) renewLoop(ctx context.Context) {
 	for {
@@ -188,9 +188,9 @@ func (c *Client) renewLoop(ctx context.Context) {
 	}
 }
 
-// -----------------------------------------------------------------------------
+//
 // SECTION 3.  Helpers
-// -----------------------------------------------------------------------------
+//
 
 func splitMount(p string) (mount, rel string) {
 	if p == "" {

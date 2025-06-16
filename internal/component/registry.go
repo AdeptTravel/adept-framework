@@ -15,9 +15,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// -----------------------------------------------------------------------------
+//
 // Contracts
-// -----------------------------------------------------------------------------
+//
 
 // Initializer is optional.  If a Component implements it, the tenant loader
 // calls Init(info) once after the tenant is loaded.
@@ -41,9 +41,9 @@ type Component interface {
 	Initializer // embed so Components may omit Init
 }
 
-// -----------------------------------------------------------------------------
+//
 // Registry implementation
-// -----------------------------------------------------------------------------
+//
 
 var (
 	mu       sync.RWMutex

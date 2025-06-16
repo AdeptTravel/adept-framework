@@ -64,9 +64,9 @@ func (t *Tenant) Router() http.Handler {
 	return t.router
 }
 
-// -----------------------------------------------------------------------------
+//
 // helpers
-// -----------------------------------------------------------------------------
+//
 
 // fetchEnabledComponents returns a set[name] for components enabled in ACL.
 func (t *Tenant) fetchEnabledComponents(ctx context.Context) map[string]struct{} {
