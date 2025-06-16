@@ -1,15 +1,6 @@
-CREATE TABLE `event_outbox` (
-  `id`               CHAR(36)    PRIMARY KEY,
-  `topic`            VARCHAR(64) NOT NULL,
-  `payload`          JSON        NOT NULL,
-  `created_at`       TIMESTAMP   NOT NULL DEFAULT NOW(),
-  `published_at`     TIMESTAMP   NULL,
-  KEY `idx_unpub` (`published_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS `site`;
 CREATE TABLE `site` (
-  `id`            INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  `id`            BIGINT AUTO_INCREMENT,
   `host`          VARCHAR(256)  NOT NULL UNIQUE,
   `theme`         VARCHAR(128)  NOT NULL DEFAULT 'base',
   `locale`        VARCHAR(16)   NOT NULL DEFAULT 'en_US',
@@ -19,10 +10,13 @@ CREATE TABLE `site` (
   `suspended_at`  TIMESTAMP NULL,
   `deleted_at`    TIMESTAMP NULL,
   `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `updated_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE OR REPLACE VIEW site_status_v AS
+CREATE UNIQUE INDEX `idx_site_host` ON `site`(`host`);
+
+CREATE OR REPLACE VIEW site_status_view AS
 SELECT
     id,
     host,
@@ -33,11 +27,8 @@ SELECT
     END AS status
 FROM site;
 
-
-DROP TABLE IF EXISTS site_config;
-
 CREATE TABLE `site_config` (
-  `site_id`  INT UNSIGNED NOT NULL,
+  `site_id`  BIGINT NOT NULL,
   `key`      VARCHAR(64)  NOT NULL,
   `value`    TEXT         NOT NULL,
 

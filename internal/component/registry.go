@@ -15,6 +15,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// -----------------------------------------------------------------------------
+// Contracts
+// -----------------------------------------------------------------------------
+
 // Initializer is optional.  If a Component implements it, the tenant loader
 // calls Init(info) once after the tenant is loaded.
 type Initializer interface {
@@ -28,7 +32,7 @@ type Initializer interface {
 //
 //	r := chi.NewRouter()
 //	r.Get("/login", getLogin)
-//	r.Route("/api", func(api chi.Router) { ... })
+//	r.Route("/api", func(api chi.Router) { … })
 //	return r
 type Component interface {
 	Name() string
@@ -37,12 +41,16 @@ type Component interface {
 	Initializer // embed so Components may omit Init
 }
 
+// -----------------------------------------------------------------------------
+// Registry implementation
+// -----------------------------------------------------------------------------
+
 var (
 	mu       sync.RWMutex
 	registry = map[string]Component{}
 )
 
-// Register is invoked from component init() functions.
+// Register is invoked from each component package’s init().
 func Register(c Component) {
 	mu.Lock()
 	registry[c.Name()] = c
@@ -56,6 +64,18 @@ func All() []Component {
 	out := make([]Component, 0, len(registry))
 	for _, c := range registry {
 		out = append(out, c)
+	}
+	return out
+}
+
+// AllNames returns a set of every registered component name.
+// Used by tenant.Router() as a fallback when component_acl is empty.
+func AllNames() map[string]struct{} {
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]struct{}, len(registry))
+	for name := range registry {
+		out[name] = struct{}{}
 	}
 	return out
 }
