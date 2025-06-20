@@ -1,36 +1,48 @@
 // internal/database/database.go
 //
-// Package database centralises sqlx connection helpers.  The wrapper stays
-// thin, but it offers context-aware dialing, retry logic, configurable pool
-// sizes, **and now a lazy DSN provider** so secrets fetched from Vault (or any
-// other rotating source) can be injected at call-time.  Existing helpers that
-// accept a raw DSN are preserved as shims so downstream code keeps compiling.
+// Package database centralises sqlx connection helpers.  In addition to the
+// existing dial-with-retry helpers, this revision adds a **tenant-aware Conn**
+// accessor so callers (e.g., the forms “store” action) can obtain the correct
+// *sqlx.DB for the current request’s tenant.  The design is intentionally thin
+// so a future connection pool / multi-host setup can replace it without
+// changing call sites.
 //
-// Oxford commas, two spaces after periods.
+// Key additions
+//   •  Registry of tenant IDs → *sqlx.DB, protected by sync.RWMutex.
+//   •  RegisterTenant(id, db) for boot-time wiring.
+//   •  WithTenant(ctx, id) helper embeds the tenant string in context.
+//   •  Conn(ctx) fetches the DB for ctx’s tenant, falling back to defaultDB.
+//   •  InitDefault(dsn) one-liner opens a default (global) connection.
+//
+// Oxford commas, two-space sentence spacing, concise inline notes.
+//
+//------------------------------------------------------------------------------
 
 package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"sync"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // side-effect import keeps driver pluggable
+	_ "github.com/go-sql-driver/mysql" // driver side-effect
 	"github.com/jmoiron/sqlx"
 )
 
 //
-// configurable options
+// Connection-pool options
 //
 
-// Options lets callers tune connection-pool behaviour and retry policy.  Zero
-// values fall back to sensible defaults.
+// Options tunes pool behaviour and retry policy.  Zero values fall back to
+// sensible defaults (see defaultOpts).
 type Options struct {
-	MaxOpenConns    int           // default 15
-	MaxIdleConns    int           // default 5
-	ConnMaxLifetime time.Duration // default 30m
-	Retries         int           // dial retries, default 0 (no retry)
-	RetryBackoff    time.Duration // sleep between retries, default 1s
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	Retries         int
+	RetryBackoff    time.Duration
 }
 
 var defaultOpts = Options{
@@ -60,20 +72,20 @@ func (dst *Options) merge() {
 // DSN provider glue
 //
 
-// DSNProvider returns a valid DSN string every time it is called.  The function
-// may hit Vault, perform in-memory rotation, or simply return a constant.
+// DSNProvider returns a DSN string.  Callers may fetch secrets from Vault or
+// rotate credentials dynamically.
 type DSNProvider func() string
 
 //
-// public helpers
+// Public dial helpers (unchanged interface)
 //
 
 func Open(dsn string) (*sqlx.DB, error) {
 	return OpenProvider(context.Background(), func() string { return dsn }, Options{})
 }
 
-func OpenProvider(ctx context.Context, dsnFunc DSNProvider, opts Options) (*sqlx.DB, error) {
-	return openWithOptions(ctx, dsnFunc, opts)
+func OpenProvider(ctx context.Context, dsn DSNProvider, opts Options) (*sqlx.DB, error) {
+	return openWithOptions(ctx, dsn, opts)
 }
 
 func OpenWithPool(dsn string, maxOpen, maxIdle int) (*sqlx.DB, error) {
@@ -90,10 +102,10 @@ func OpenWithOptions(ctx context.Context, dsn string, opts Options) (*sqlx.DB, e
 }
 
 //
-// internal dial + retry loop
+// Internal dial + retry loop
 //
 
-func openWithOptions(ctx context.Context, dsnFunc DSNProvider, opts Options) (*sqlx.DB, error) {
+func openWithOptions(ctx context.Context, dsn DSNProvider, opts Options) (*sqlx.DB, error) {
 	opts.merge()
 
 	var lastErr error
@@ -104,7 +116,7 @@ func openWithOptions(ctx context.Context, dsnFunc DSNProvider, opts Options) (*s
 			return nil, ctx.Err()
 		}
 
-		db, err := sqlx.Open("mysql", dsnFunc())
+		db, err := sqlx.Open("mysql", dsn())
 		if err != nil {
 			lastErr = err
 			goto retry
@@ -136,4 +148,60 @@ func openWithOptions(ctx context.Context, dsnFunc DSNProvider, opts Options) (*s
 		lastErr = errors.New("database: open failed with unknown error")
 	}
 	return nil, lastErr
+}
+
+//
+// Tenant registry
+//
+
+var (
+	regMu     sync.RWMutex
+	tenantDB  = make(map[string]*sqlx.DB)
+	defaultDB *sqlx.DB
+)
+
+type ctxKey struct{}
+
+// WithTenant returns a child context tagged with tenantID.
+func WithTenant(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, ctxKey{}, tenantID)
+}
+
+// RegisterTenant associates tenantID with db.  Call once during tenant
+// bootstrap (e.g., after migrations).
+func RegisterTenant(tenantID string, db *sqlx.DB) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	tenantDB[tenantID] = db
+}
+
+// InitDefault sets the global fallback connection used when ctx has no tenant.
+func InitDefault(db *sqlx.DB) { defaultDB = db }
+
+// Conn returns the *sqlx.DB for the current tenant, or defaultDB when the
+// context is not tenant-scoped.  It returns a zero sqlx.DB pointer if neither
+// is registered, allowing callers to check for nil.
+func Conn(ctx context.Context) *sqlx.DB {
+	if ctx != nil {
+		if id, ok := ctx.Value(ctxKey{}).(string); ok {
+			regMu.RLock()
+			db := tenantDB[id]
+			regMu.RUnlock()
+			return db
+		}
+	}
+	return defaultDB
+}
+
+//
+// Utility shim for sql.DB compat callers (rare)
+//
+
+// Raw returns the underlying *sql.DB to interoperate with packages that do not
+// understand sqlx.
+func Raw(db *sqlx.DB) *sql.DB {
+	if db == nil {
+		return nil
+	}
+	return db.DB
 }

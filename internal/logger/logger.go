@@ -1,30 +1,22 @@
 // internal/logger/logger.go
 //
-// Structured JSON logger (Zap + Lumberjack).
+// Structured JSON logger (Zap + Lumberjack) **plus** tiny adapter so call-sites
+// can use logger.FromContext(ctx).Error(…) / Warn(…) without depending on Zap.
 //
 // Context
-// -------
-// Adept writes lifecycle and error events to one JSON log per day under
-// `<root>/logs/YYYY-MM-DD.log`.  When running in an interactive TTY we tee
-// the same events, colorized, to stdout.  Rotation, compression, and
-// retention are handled by Lumberjack; no external log-rotate job is
-// required.
+//   • Zap core writes one JSON file per day under logs/YYYY-MM-DD.log.
+//   • Colored tee to stdout when running in an interactive TTY.
+//   • logger.WithContext(ctx, l) embeds a request-scoped logger.
+//   • logger.FromContext(ctx) fetches that or falls back to the global.
 //
-// Usage
-// -----
+// Two-space sentence spacing, Oxford comma per style guide.
 //
-//	log, err := logger.New(cfg.Paths.Root, runningInTTY())
-//	if err != nil { … }
-//	log.Infow("tenant online", "tenant", host)
-//
-// Notes
-// -----
-// • Zap core uses ISO-8601 timestamps and lowercase levels.
-// • Errors are written to the same sink via `ErrorOutput`.
-// • Oxford commas, two spaces after periods.
+//------------------------------------------------------------------------------
+
 package logger
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,9 +26,10 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// New returns a *zap.SugaredLogger that writes JSON to /logs/YYYY-MM-DD.log.
-// When tee == true, a colored console core is also attached.  The logger
-// is installed as the process-wide default via zap.ReplaceGlobals.
+//
+// Core setup (unchanged)
+//
+
 func New(rootDir string, tee bool) (*zap.SugaredLogger, error) {
 	logDir := filepath.Join(rootDir, "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -46,9 +39,9 @@ func New(rootDir string, tee bool) (*zap.SugaredLogger, error) {
 	fileName := time.Now().Format("2006-01-02") + ".log"
 	fileSink := &lumberjack.Logger{
 		Filename:   filepath.Join(logDir, fileName),
-		MaxSize:    50, // MB
-		MaxBackups: 7,  // keep last seven files
-		MaxAge:     14, // days
+		MaxSize:    50,
+		MaxBackups: 7,
+		MaxAge:     14,
 		Compress:   true,
 	}
 
@@ -61,15 +54,14 @@ func New(rootDir string, tee bool) (*zap.SugaredLogger, error) {
 		EncodeLevel:  zapcore.LowercaseLevelEncoder,
 		EncodeCaller: zapcore.ShortCallerEncoder,
 	}
+
 	jsonCore := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encCfg),
 		zapcore.AddSync(fileSink),
 		zap.InfoLevel,
 	)
 
-	var cores []zapcore.Core
-	cores = append(cores, jsonCore)
-
+	cores := []zapcore.Core{jsonCore}
 	if tee {
 		consoleCore := zapcore.NewCore(
 			zapcore.NewConsoleEncoder(encCfg),
@@ -84,9 +76,41 @@ func New(rootDir string, tee bool) (*zap.SugaredLogger, error) {
 		zap.ErrorOutput(zapcore.AddSync(fileSink)),
 	).Sugar()
 
-	// Make this the global logger so zap.L() works everywhere after startup.
-	zap.ReplaceGlobals(z.Desugar())
+	zap.ReplaceGlobals(z.Desugar()) // global fallback
 
 	z.Infow("logger online", "tee", tee)
 	return z, nil
+}
+
+//
+// Adapter layer: Logger interface + context helpers
+//
+
+// Logger is the minimal interface expected by call-sites.
+type Logger interface {
+	Error(msg string, kv ...any)
+	Warn(msg string, kv ...any)
+}
+
+// zapAdapter wraps *zap.SugaredLogger to satisfy Logger.
+type zapAdapter struct{ *zap.SugaredLogger }
+
+func (l zapAdapter) Error(msg string, kv ...any) { l.Errorw(msg, kv...) }
+func (l zapAdapter) Warn(msg string, kv ...any)  { l.Warnw(msg, kv...) }
+
+type ctxKey struct{}
+
+// WithContext embeds l into ctx, returning the derived context.
+func WithContext(ctx context.Context, l Logger) context.Context {
+	return context.WithValue(ctx, ctxKey{}, l)
+}
+
+// FromContext returns the Logger stored in ctx, or the global zap.S() adapter.
+func FromContext(ctx context.Context) Logger {
+	if ctx != nil {
+		if v, ok := ctx.Value(ctxKey{}).(Logger); ok {
+			return v
+		}
+	}
+	return zapAdapter{zap.S()}
 }
