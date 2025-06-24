@@ -1,0 +1,26 @@
+id: "auth/login"
+title: "User Login"
+
+fields:
+  - name: email
+    label: "Email address"
+    type: email
+    placeholder: "you@example.com"
+    required: true
+    pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    error: "Enter a valid email address."
+    minlength: 3
+    maxlength: 254
+
+  - name: password
+    label: "Password"
+    type: password
+    placeholder: "••••••••"
+    required: true
+    minlength: 8
+    error: "Password must be at least 8 characters."
+
+  - name: remember_me
+    label: "Remember me on this device"
+    type: checkbox
+    required: false

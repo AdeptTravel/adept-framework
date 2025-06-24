@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 
 	// Side-effect import: example component registers itself via init().
+	_ "github.com/yanizio/adept/components/auth"
 	_ "github.com/yanizio/adept/components/example"
 
 	"github.com/yanizio/adept/internal/config"

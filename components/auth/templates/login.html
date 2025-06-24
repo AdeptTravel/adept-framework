@@ -1,0 +1,19 @@
+{{ define "content" }}
+<div class="flex min-h-screen items-center justify-center bg-gray-50">
+  <div class="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
+    <h1 class="mb-6 text-center text-2xl font-semibold">Sign in to Adept</h1>
+
+    {{/* Display global (non-field) errors if any */}}
+    {{ with .FormErrors }}
+    <div class="mb-4 rounded bg-red-50 p-3 text-sm text-red-700" role="alert">
+      Submission failed – see highlighted fields.
+    </div>
+    {{ end }}
+
+    <form method="POST" action="/login">
+      {{ widget "auth/login" (dict "prefill" .FormPrefill) }}
+      <button type="submit" class="btn-primary mt-6 w-full">Sign in</button>
+    </form>
+  </div>
+</div>
+{{ end }}
