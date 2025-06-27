@@ -2,9 +2,18 @@
 //
 // Cached per-tenant router.
 //
-// The router is built once per tenant (lazy) and cached.  It mounts only
-// Components enabled in `component_acl` and wires the alias-rewrite and
-// request-info middleware in the correct order.
+// Each Tenant lazily builds an in-memory chi.Router on first use and caches it
+// in `t.router`.  The router mounts only those Components that are enabled for
+// the tenant (via `component_acl`) and wires middleware in the following order:
+//
+//   1. **alias-rewrite** – rewrites friendly URLs → absolute component paths
+//   2. **request-info**  – enriches the context with GeoIP / UA hints
+//   3. **component routes** – mounts each enabled Component at “/”
+//   4. **NotFound**      – final fallback renders home.html or 404
+//
+// All per-request logging or analytics will be handled later by the analytics
+// package; no experimental middleware is referenced here.
+//
 
 package tenant
 
@@ -12,6 +21,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -32,11 +42,19 @@ func (t *Tenant) Router() http.Handler {
 	t.routerOnce.Do(func() {
 		r := chi.NewRouter()
 
-		// Alias rewrite must run before request-info enrichment.
+		// ---------------------------------------------------------------------
+		// 1. Alias rewrite → absolute path.
+		// ---------------------------------------------------------------------
 		r.Use(routing.Middleware(t))
+
+		// ---------------------------------------------------------------------
+		// 2. Enrich request context (GeoIP, UA family, etc.).
+		// ---------------------------------------------------------------------
 		r.Use(requestinfo.Enrich)
 
-		// Query component ACL at build time.
+		// ---------------------------------------------------------------------
+		// 3. Mount each enabled Component.
+		// ---------------------------------------------------------------------
 		enabled := t.fetchEnabledComponents(context.Background())
 		if len(enabled) == 0 {
 			zap.L().Warn("component_acl empty – mounting all components",
@@ -50,7 +68,9 @@ func (t *Tenant) Router() http.Handler {
 			}
 		}
 
-		// Fallback: render home.html or 404.
+		// ---------------------------------------------------------------------
+		// 4. Fallback – render home page or plain 404.
+		// ---------------------------------------------------------------------
 		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
 			err := t.Renderer.ExecuteTemplate(w, "home.html",
 				map[string]any{"Config": t.Config})
@@ -67,6 +87,8 @@ func (t *Tenant) Router() http.Handler {
 //
 // helpers
 //
+
+var _ sync.Once // keep go vet happy if routerOnce defined elsewhere
 
 // fetchEnabledComponents returns a set[name] for components enabled in ACL.
 func (t *Tenant) fetchEnabledComponents(ctx context.Context) map[string]struct{} {
@@ -106,5 +128,4 @@ func isUnknownTable(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "1146") || strings.Contains(msg, "42P01")
-
 }
