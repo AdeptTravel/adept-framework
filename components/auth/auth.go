@@ -1,6 +1,18 @@
 // components/auth/auth.go
 //
-// Adept authentication component – login flow.
+// Adept authentication component.
+//
+// Responsibilities
+// ----------------
+//   • Serve GET /login and POST /login routes.
+//   • Render the login form via widget “auth/login”.
+//   • Validate submissions using the form subsystem.
+//   • Authenticate users (stubbed here) and start a session.
+//
+// Notes
+// -----
+// • Oxford commas, two spaces after periods.
+// • Corresponding template file: components/auth/templates/login.html.
 //
 //------------------------------------------------------------------------------
 
@@ -10,6 +22,10 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
+
+	// Side-effect import registers the “auth/login” widget at init().
+	_ "github.com/yanizio/adept/components/auth/widgets"
 
 	"github.com/yanizio/adept/internal/component"
 	"github.com/yanizio/adept/internal/form"
@@ -18,21 +34,24 @@ import (
 	"github.com/yanizio/adept/internal/view"
 )
 
-// Compile-time assertion: *Component satisfies component.Component.
+// Compile-time assertion: *Component implements component.Component.
 var _ component.Component = (*Component)(nil)
 
-// Component encapsulates login functionality.
+// template keys (no “.html” extension).
+const tplLogin = "login"
+
+// Component encapsulates authentication routes.
 type Component struct{}
 
-/*────────────────── component.Component methods ───────────────────────────*/
+/*──────────────── component.Component interface ─────────────────────────*/
 
 // Name returns the canonical component key.
 func (c *Component) Name() string { return "auth" }
 
-// Migrations returns nil – auth has no DB schema (yet).
+// Migrations returns nil – auth currently has no DB schema.
 func (c *Component) Migrations() []string { return nil }
 
-// Init satisfies component.Initializer; no tenant-specific boot work.
+// Init satisfies component.Initializer; no per-tenant boot work needed.
 func (c *Component) Init(component.TenantInfo) error { return nil }
 
 // Routes builds and returns the router mounted at “/”.
@@ -43,28 +62,35 @@ func (c *Component) Routes() chi.Router {
 	return r
 }
 
-// Register component at program start.
+// Register the component during program init.
 func init() { component.Register(&Component{}) }
 
-/*──────────────────────────── Handlers ─────────────────────────────────────*/
+/*──────────────────────────── Route handlers ─────────────────────────────*/
 
+// handleLoginGET renders the blank login page.
 func (c *Component) handleLoginGET(w http.ResponseWriter, r *http.Request) {
-	vctx := tenant.NewContext(r) // *tenant.Context for view layer
-	view.Render(vctx, w, "auth", "login.html", nil, view.CacheSkip)
+	vctx := tenant.NewContext(r)
+	if err := view.Render(vctx, w, "auth", tplLogin, nil, view.CacheSkip); err != nil {
+		zap.L().Error("login page render", zap.Error(err))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
 }
 
+// handleLoginPOST validates the form, then logs the user in.
 func (c *Component) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 	vctx := tenant.NewContext(r)
 
 	data, err := form.HandleSubmit("auth/login", r)
 	if err != nil {
 		if form.IsValidationError(err) {
-			view.Render(vctx, w, "auth", "login.html", map[string]any{
+			// Re-render form with field errors and preserved input.
+			_ = view.Render(vctx, w, "auth", tplLogin, map[string]any{
 				"FormErrors":  err,
 				"FormPrefill": r.PostForm,
 			}, view.CacheSkip)
 			return
 		}
+		zap.L().Error("login form processing", zap.Error(err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -72,7 +98,7 @@ func (c *Component) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 	email := data["email"].(string)
 	pass := data["password"].(string)
 	if !checkCredentials(email, pass) {
-		view.Render(vctx, w, "auth", "login.html", map[string]any{
+		_ = view.Render(vctx, w, "auth", tplLogin, map[string]any{
 			"FormErrors": []form.ErrorField{{
 				Name:    "password",
 				Message: "Incorrect email or password.",
@@ -86,6 +112,7 @@ func (c *Component) handleLoginPOST(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
-/*──────────────────────── Stub credential check ───────────────────────────*/
+/*────────────────────── Stub credential checker ─────────────────────────*/
 
+// checkCredentials is a placeholder.  Replace with real auth logic.
 func checkCredentials(_, _ string) bool { return false }

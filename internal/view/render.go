@@ -1,7 +1,7 @@
 // internal/view/render.go
 //
-// Central view engine: template lookup, override chain, func-map
-// injection, and an LRU of parsed *template.Template* sets.
+// Central view engine: template lookup, override chain, func-map injection,
+// and an LRU of parsed *template.Template* sets.
 //
 // Public helpers
 // --------------
@@ -9,12 +9,25 @@
 //   - RenderToString – return template.HTML (widgets, e-mails).
 //
 // Lookup precedence (first hit wins):
-//  1. sites/<host>/components/<comp>/templates/<tpl>.html
-//  2. themes/<theme>/components/<comp>/templates/<tpl>.html
-//  3. components/<comp>/templates/<tpl>.html
+//   1. sites/<host>/components/<comp>/templates/<tpl>.html
+//   2. themes/<theme>/components/<comp>/templates/<tpl>.html
+//   3. components/<comp>/templates/<tpl>.html
 //
 // All templates in the same directory are parsed as one set so sub-templates
 // ({{ template "row" . }}) work out-of-the-box.
+//
+// New in July 2025
+// ----------------
+//   • execName() chooses the best template to execute:
+//       – If the set contains "<name>.html", we run that (file has no define).
+//       – Else we fall back to "<name>" (root template defined via {{ define }}).
+//   • Callers now pass the logical name (e.g. "login"); view.Render figures
+//     out the concrete template automatically.
+//
+// Style
+// -----
+// • Oxford commas, two spaces after periods.
+
 package view
 
 import (
@@ -44,7 +57,7 @@ const (
 	CacheForce                      // always cache (long TTL, reserved)
 )
 
-// Parsed template sets per tenant; tweak when perf-testing.
+// Parsed template sets per tenant; tweak capacity when perf-testing.
 var tmplLRU = cache.New(1024)
 var once sync.Once
 
@@ -52,23 +65,34 @@ var once sync.Once
 // public helpers
 //
 
-// Render executes the template and streams it to w.
+// Render executes the template set and streams it to w.
+//
+// We first load (or parse) the appropriate template set, then execute the
+// concrete template determined by execName().  This allows both:
+//
+//   - A simple file "login.html" with no {{ define }} block.  In that case
+//     execName runs "login.html" automatically.
+//   - A file that wraps markup in {{ define "login" }} … {{ end }} and relies
+//     on that root template name.
+//
+// Either style works; developers can choose per component.
 func Render(ctx *tenant.Context, w http.ResponseWriter, comp, name string, data any, policy CachePolicy) error {
 	t, err := load(ctx, comp, name, policy)
 	if err != nil {
 		return err
 	}
-	return t.ExecuteTemplate(w, name, data)
+	return t.ExecuteTemplate(w, execName(t, name), data)
 }
 
-// RenderToString executes and returns HTML (widgets, e-mails).
+// RenderToString executes and returns HTML (used by widgets and e-mail
+// generators).  It mirrors Render, but writes to a buffer instead of w.
 func RenderToString(ctx *tenant.Context, comp, name string, data any) (template.HTML, CachePolicy, error) {
 	t, err := load(ctx, comp, name, CacheDefault)
 	if err != nil {
 		return "", CacheSkip, err
 	}
 	var buf bytes.Buffer
-	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
+	if err := t.ExecuteTemplate(&buf, execName(t, name), data); err != nil {
 		return "", CacheSkip, err
 	}
 	return template.HTML(buf.String()), CacheDefault, nil
@@ -78,6 +102,8 @@ func RenderToString(ctx *tenant.Context, comp, name string, data any) (template.
 // internal: load
 //
 
+// load finds and (if necessary) parses the template set for the given tenant,
+// component, and base name, obeying the provided cache policy.
 func load(ctx *tenant.Context, comp, name string, policy CachePolicy) (*template.Template, error) {
 	theme := "default" // TODO: derive from tenant once theme support lands
 	key := strings.Join([]string{ctx.Request.Host, theme, comp, name}, "::")
@@ -105,7 +131,7 @@ func load(ctx *tenant.Context, comp, name string, policy CachePolicy) (*template
 		return nil, os.ErrNotExist
 	}
 
-	// Parse all *.html in the same directory for sub-templates.
+	// Parse all *.html in the same directory so sub-templates work.
 	dir := filepath.Dir(base)
 	pattern := filepath.Join(dir, "*.html")
 
@@ -120,13 +146,17 @@ func load(ctx *tenant.Context, comp, name string, policy CachePolicy) (*template
 	return t, nil
 }
 
+//
+// func-map builders
+//
+
 func buildFuncMap(rctx *tenant.Context) template.FuncMap {
 	fm := template.FuncMap{
 		"dict":   dict,
 		"widget": widgetFunc(rctx),
 		"area":   areaFunc(rctx),
 	}
-	for k, v := range uaFuncMap() { // UA helpers
+	for k, v := range uaFuncMap() { // UA helpers (browser/os parsing)
 		fm[k] = v
 	}
 	return fm
@@ -136,7 +166,19 @@ func buildFuncMap(rctx *tenant.Context) template.FuncMap {
 // helpers
 //
 
-// dict builds a map in templates: {{ dict "k" 1 "k2" "v" }}
+// execName picks the template name to execute.
+//
+// Priority:
+//  1. If the set has "<name>.html" (file-based template), run that.
+//  2. Otherwise, fall back to "<name>" (root template defined in code).
+func execName(t *template.Template, name string) string {
+	if tmpl := t.Lookup(name + ".html"); tmpl != nil {
+		return name + ".html"
+	}
+	return name
+}
+
+// dict builds a map in templates: {{ dict "k" 1 "k2" "v" }}.
 func dict(kv ...any) map[string]any {
 	m := make(map[string]any, len(kv)/2)
 	for i := 0; i+1 < len(kv); i += 2 {
@@ -146,7 +188,8 @@ func dict(kv ...any) map[string]any {
 	return m
 }
 
-// widgetFunc renders a registered widget and returns safe HTML.
+// widgetFunc renders a registered widget and returns safe HTML.  Errors are
+// hidden behind <!-- comments --> so end-users never see stack traces.
 func widgetFunc(rctx *tenant.Context) func(string, map[string]any) template.HTML {
 	return func(key string, params map[string]any) template.HTML {
 		w := widget.Lookup(key)

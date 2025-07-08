@@ -6,10 +6,11 @@
 // ----------------
 //   1. Parse configuration and bootstrap logging / Vault / DB.
 //   2. Maintain an LRU cache of live *tenant.Tenant aggregates.
-//   3. Expose Prometheus metrics at /metrics.
-//   4. Route every incoming host to its per-tenant chi.Router.
-//   5. Enforce optional HTTPS + always set security headers.
-//   6. Start an http.Server with sane production timeouts.
+//   3. Load all YAML-defined forms at startup so form widgets work.
+//   4. Expose Prometheus metrics at /metrics.
+//   5. Route every incoming host to its per-tenant chi.Router.
+//   6. Enforce optional HTTPS, always set security headers.
+//   7. Start an http.Server with sane production timeouts.
 //
 // Notes
 // -----
@@ -30,12 +31,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
-	// Side-effect import: example component registers itself via init().
-	_ "github.com/yanizio/adept/components/auth"
-	_ "github.com/yanizio/adept/components/example"
+	// Side-effect imports: components self-register in init().
+	_ "github.com/yanizio/adept/components/auth"    // auth routes + widgets
+	_ "github.com/yanizio/adept/components/example" // sample component
 
 	"github.com/yanizio/adept/internal/config"
 	"github.com/yanizio/adept/internal/database"
+	"github.com/yanizio/adept/internal/form"
 	"github.com/yanizio/adept/internal/logger"
 	"github.com/yanizio/adept/internal/middleware"
 	"github.com/yanizio/adept/internal/server"
@@ -52,46 +54,56 @@ func runningInTTY() bool {
 }
 
 func main() {
-	// 0. Early dev logger so boot errors appear.
+	/*──────────────────────── Bootstrap phase ─────────────────────────────*/
+
+	// 0. Early dev logger ensures boot errors are visible in TTY.
 	zap.ReplaceGlobals(zap.Must(zap.NewDevelopment()))
 
-	// 1. Load configuration (yaml + Vault resolution).
+	// 1. Load configuration (YAML → struct, with Vault URI resolution).
 	cfg, err := config.Load()
 	if err != nil {
-		zap.L().Fatal("config load", zap.Error(err))
+		zap.L().Fatal("config load failed", zap.Error(err))
 	}
 
-	// 2. Structured JSON logger (rotates daily).
+	// 2. Structured JSON logger (rotates daily, colorizes in TTY).
 	logOut, err := logger.New(cfg.Paths.Root, runningInTTY())
 	if err != nil {
-		zap.L().Fatal("logger init", zap.Error(err))
+		zap.L().Fatal("logger init failed", zap.Error(err))
 	}
 
-	// 3. Vault client (AppRole token already exported at startup).
+	// 3. Vault client (AppRole token is already exported at startup by daemon).
 	vaultCli, err := vault.New(context.Background(), logOut.Debugf)
 	if err != nil {
-		logOut.Fatalw("vault init", zap.Error(err))
+		logOut.Fatalw("vault init failed", zap.Error(err))
 	}
 
-	// 4. Global DB pool.
+	// 4. Global DB pool (holds cross-tenant + internal tables).
 	dsn := func() string {
 		c := config.Get()
 		return fmt.Sprintf(c.Database.GlobalDSN, c.Database.GlobalPassword)
 	}
 	globalDB, err := database.OpenProvider(context.Background(), dsn, database.Options{})
 	if err != nil {
-		logOut.Fatalw("global DB connect", zap.Error(err))
+		logOut.Fatalw("global DB connect failed", zap.Error(err))
 	}
 	defer globalDB.Close()
 
-	// 5. Tenant LRU cache (30-min idle TTL, max 100 tenants).
+	// 5. Load *all* YAML-defined forms now so widgets can render later.
+	//    We pass only the repo root – form.RegisterForms walks the tree.
+	if err := form.RegisterForms([]string{cfg.Paths.Root}); err != nil {
+		logOut.Fatalw("form load failed", zap.Error(err))
+	}
+
+	// 6. Tenant LRU cache (30-min idle-TTL, max 100 tenants in memory).
 	cache := tenant.New(globalDB, 30*time.Minute, 100, logOut, vaultCli)
 
-	// 6. Prometheus metrics endpoint.
+	/*──────────────────────── HTTP handler setup ──────────────────────────*/
+
+	// 7. Prometheus metrics endpoint.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// 7. Root handler: strip :port → cache → tenant.Router().
+	// 8. Root handler: map Host → tenant → chi.Router.
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
 		ten, err := cache.Get(host)
@@ -102,7 +114,7 @@ func main() {
 		ten.Router().ServeHTTP(w, r)
 	})
 
-	// 8. Middleware chain: Security always, ForceHTTPS optional.
+	// 9. Middleware chain: Security headers always, HTTPS redirect optional.
 	var handler http.Handler = root
 	handler = middleware.Security(handler)
 	if cfg.HTTP.ForceHTTPS {
@@ -110,14 +122,16 @@ func main() {
 	}
 	mux.Handle("/", handler)
 
-	// 9. Build server with timeouts, then listen.
+	// 10. Build http.Server with sane production timeouts, then listen.
 	srv := server.New(cfg.HTTP.ListenAddr, mux)
 
 	logOut.Infow("listening", "addr", cfg.HTTP.ListenAddr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logOut.Fatalw("http server", zap.Error(err))
+		logOut.Fatalw("http server stopped unexpectedly", zap.Error(err))
 	}
 }
+
+/*────────────────────────── Utility helpers ──────────────────────────────*/
 
 // stripPort("example.com:443") → "example.com".
 func stripPort(h string) string {
